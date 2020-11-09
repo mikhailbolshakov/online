@@ -1,0 +1,86 @@
+version: '3'
+
+services:
+  migrations:
+    network_mode: host
+    build: ./db
+
+  redis:
+    network_mode: host
+    image: redis:3.2-alpine
+    expose:
+      - 6379
+    restart: always
+
+#  cron:
+#    build: .
+#    depends_on:
+#      - redis
+#      - migrations
+#    env_file:
+#      - .env-cron
+#    restart: always
+
+  nats:
+    network_mode: host
+    image: nats:latest
+    expose:
+      - 4222
+    restart: always
+
+  users:
+    network_mode: host
+    build: ../users
+    depends_on:
+      - nats
+    env_file:
+      - ../users/.env
+    volumes:
+      - ../users/app:/var/www
+      - profile:/var/profile
+    restart: always
+
+#  telemed:
+#    network_mode: host
+#    build: ../telemed
+#    depends_on:
+#      - nats
+#    env_file:
+#      - ../telemed/.env
+#    volumes:
+#      - ../users/app:/var/www
+#      - profile:/var/profile
+#    restart: always
+
+  chats:
+    network_mode: host
+    build: .
+    depends_on:
+      - redis
+      - nats
+      - migrations
+    env_file:
+      - .env
+    ports:
+      - 8086-8087:8000
+    restart: always
+
+#  api-rgs:
+#    network_mode: host
+#    build: ../api-rgs
+#    depends_on:
+#      - chats
+#    env_file:
+#      - ../api-rgs/.env
+#    restart: always
+
+#  nginx:
+#    network_mode: host
+#    build: ../api-rgs/nginx
+#    restart: always
+
+
+
+volumes:
+  profile:
+    external: true

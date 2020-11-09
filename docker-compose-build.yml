@@ -1,0 +1,16 @@
+version: '3.4'
+
+services:
+  migrations:
+    build:
+      context: ./db
+      dockerfile: Dockerfile-alt
+    image: docker.medzdrav.ru/vtb-${APP_NAME}-db:${TAG}
+    network_mode: host
+
+  chats:
+    build:
+      context: .
+      dockerfile: Dockerfile-alt
+    image: docker.medzdrav.ru/vtb-${APP_NAME}:${TAG}
+    network_mode: host

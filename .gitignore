@@ -1,0 +1,9 @@
+src/chats/main/home.html
+.idea/*
+.env
+.env-cron
+vendor/
+pkg/*
+src/chats/vendor
+db/dbconf.yml
+go-sdk/

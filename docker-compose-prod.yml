@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  redis:
+    image: redis:3.2-alpine
+    expose:
+      - 6379
+    restart: always
+
+  chats:
+    image: docker.medzdrav.ru/vtb-chats:2.6.9
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    ports:
+      - 8086-8087:8000
+    restart: always

@@ -1,0 +1,58 @@
+variables:
+  APP_NAME: chats
+  DOCKER_DRIVER: overlay
+stages:
+  - build
+  - deploy
+
+include:
+  - project: 'health-service/ci-templates'
+    ref: master
+    file: '/templates.yml'
+
+build:latest:
+  extends: .build-latest
+
+build:release:
+  extends: .build-release
+
+build:hotfix:
+  extends: .build-hotfix
+
+deploy:dev:
+  stage: deploy
+  script:
+    - if [ -f "${KUBE_PATH}/${APP_NAME}/jobs.yaml" ]; then kubectl delete --ignore-not-found=true -f ${KUBE_PATH}/${APP_NAME}/jobs.yaml; fi
+    - if [ -f "${KUBE_PATH}/${APP_NAME}/jobs.yaml" ]; then kubectl apply -f ${KUBE_PATH}/${APP_NAME}/jobs.yaml; fi
+    - kubectl rollout restart deployments/${APP_NAME}
+    - kubectl rollout restart deployments/${APP_NAME}-cron
+    - if [ -f "${KUBE_PATH}/redis/jobs.yaml" ]; then kubectl delete --ignore-not-found=true -f ${KUBE_PATH}/redis/jobs.yaml; fi
+    - if [ -f "${KUBE_PATH}/redis/jobs.yaml" ]; then kubectl apply -f ${KUBE_PATH}/redis/jobs.yaml; fi
+  environment:
+    name: dev
+    url: https://new-dev.medzdrav.ru/
+  only:
+    - dev
+  tags:
+    - dev
+    - master
+
+deploy:staging:
+  stage: deploy
+  script:
+    - if [ -f "${KUBE_PATH}/${APP_NAME}/jobs.yaml" ]; then kubectl delete --ignore-not-found=true -f ${KUBE_PATH}/${APP_NAME}/jobs.yaml; fi
+    - if [ -f "${KUBE_PATH}/${APP_NAME}/jobs.yaml" ]; then kubectl apply -f ${KUBE_PATH}/${APP_NAME}/jobs.yaml; fi
+    - kubectl rollout restart deployments/${APP_NAME}
+    - kubectl rollout restart deployments/${APP_NAME}-cron
+    - if [ -f "${KUBE_PATH}/redis/jobs.yaml" ]; then kubectl delete --ignore-not-found=true -f ${KUBE_PATH}/redis/jobs.yaml; fi
+    - if [ -f "${KUBE_PATH}/redis/jobs.yaml" ]; then kubectl apply -f ${KUBE_PATH}/redis/jobs.yaml; fi
+  environment:
+    name: staging
+    url: https://new.medzdrav.ru/
+  only:
+    - tags
+  except:
+    - branches
+  tags:
+    - staging
+    - master
