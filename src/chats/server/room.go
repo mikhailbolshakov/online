@@ -3,24 +3,25 @@ package server
 import (
 	"chats/database"
 	"chats/models"
+	uuid "github.com/satori/go.uuid"
 	"sync"
 )
 
 type Room struct {
 	clients     map[string]bool
-	subscribers []database.SubscribeUserModel
+	subscribers []database.SubscribeAccountModel
 	clientMutex sync.Mutex
-	roomId      uint
+	roomId      uuid.UUID
 }
 
 type RoomMessage struct {
-	SendPush bool
-	UserId   uint
-	RoomId   uint
-	Message  *models.WSChatResponse
+	SendPush  bool
+	AccountId uuid.UUID
+	RoomId    uuid.UUID
+	Message   *models.WSChatResponse
 }
 
-func CreateRoom(roomId uint, subscribers []database.SubscribeUserModel) *Room {
+func CreateRoom(roomId uuid.UUID, subscribers []database.SubscribeAccountModel) *Room {
 	return &Room{
 		clients:     make(map[string]bool),
 		subscribers: subscribers,
@@ -57,7 +58,7 @@ func (r *Room) getRoomClientIds() []string {
 	return uniqueIds
 }
 
-func (r *Room) UpdateSubscribers(subscribers []database.SubscribeUserModel) {
+func (r *Room) UpdateSubscribers(subscribers []database.SubscribeAccountModel) {
 	r.clientMutex.Lock()
 	defer r.clientMutex.Unlock()
 	r.subscribers = subscribers

@@ -35,14 +35,6 @@
   version = "v6.12.0"
 
 [[projects]]
-  digest = "1:adea5a94903eb4384abef30f3d878dc9ff6b6b5b0722da25b82e5169216dfb61"
-  name = "github.com/go-sql-driver/mysql"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "d523deb1b23d913de5bdada721a6071e71283618"
-  version = "v1.4.0"
-
-[[projects]]
   digest = "1:8f13f978d35181fada0ea713c14a224f2b329fa91c13438b2811331ecd8b16e1"
   name = "github.com/gogo/protobuf"
   packages = [
@@ -55,6 +47,14 @@
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:ffe5ba52b122a56df4f9854ea2918e0d9f86e74919db63dc138f8fee3253d3d6"
+  name = "github.com/google/uuid"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "0e4e31197428a347842d152773b4cace4645ca25"
+  version = "v1.1.2"
+
+[[projects]]
   digest = "1:43dd08a10854b2056e615d1b1d22ac94559d822e1f8b6fcc92c1a1057e85188e"
   name = "github.com/gorilla/websocket"
   packages = ["."]
@@ -63,9 +63,12 @@
   version = "v1.2.0"
 
 [[projects]]
-  digest = "1:235ae01f32fb5f12c5f6d2e0e05ab48e651ab31c126e45a4efc4f510810941ac"
+  digest = "1:6895fbe5a10c5aebd1965cac6f6905dcdb21bee01e08912d3ba6a805c2485f6a"
   name = "github.com/jinzhu/gorm"
-  packages = ["."]
+  packages = [
+    ".",
+    "dialects/postgres",
+  ]
   pruneopts = "UT"
   revision = "6ed508ec6a4ecb3531899a69cbc746ccf65a4166"
   version = "v1.9.1"
@@ -85,6 +88,19 @@
   pruneopts = "UT"
   revision = "a79fa1e548e2c689c241d10173efd51e5d689d5b"
   version = "v1.2.0"
+
+[[projects]]
+  digest = "1:a40b57e466a0caf149e1c354c6ff820ff9cff2ebe4e10b4270100a4ad0d7e928"
+  name = "github.com/lib/pq"
+  packages = [
+    ".",
+    "hstore",
+    "oid",
+    "scram",
+  ]
+  pruneopts = "UT"
+  revision = "e7751f584844fbf92a5a18b13a0af1c855e34460"
+  version = "v1.8.0"
 
 [[projects]]
   branch = "master"
@@ -141,47 +157,21 @@
   pruneopts = "UT"
   revision = "36e9d2ebbde5e3f13ab2e25625fd453271d6522e"
 
-[[projects]]
-  digest = "1:c63248d7e462e5b87b5e75d936fe556569496c4e962a9760c997d853d0d8cf1e"
-  name = "gitlab.medzdrav.ru/health-service/go-sdk"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "938e8eafdeabfc99211dc7d0d6867e66d566d1eb"
-  source = "git@gitlab.medzdrav.ru:health-service/go-sdk.git"
-  version = "3.3.15"
-
-[[projects]]
-  digest = "1:7cfdeeec8322a00ae8969fa90e2240a1f13fe18b592e062f9e9a8a4d26e4f8e6"
-  name = "gitlab.medzdrav.ru/health-service/go-tools"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "b09a3adbcd11584ec0d1bffdd052be22e6be81b0"
-  source = "git@gitlab.medzdrav.ru:health-service/go-tools.git"
-  version = "v1.0.1"
-
-[[projects]]
-  digest = "1:c25289f43ac4a68d88b02245742347c94f1e108c534dda442188015ff80669b3"
-  name = "google.golang.org/appengine"
-  packages = ["cloudsql"]
-  pruneopts = "UT"
-  revision = "150dc57a1b433e64154302bdc40b6bb8aefa313a"
-  version = "v1.0.0"
-
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
     "github.com/getsentry/raven-go",
     "github.com/go-redis/redis",
-    "github.com/go-sql-driver/mysql",
+    "github.com/google/uuid",
     "github.com/gorilla/websocket",
     "github.com/jinzhu/gorm",
+    "github.com/jinzhu/gorm/dialects/postgres",
     "github.com/joho/godotenv",
     "github.com/mkevac/gopinba",
+    "github.com/nats-io/go-nats",
     "github.com/pkg/errors",
     "github.com/satori/go.uuid",
-    "gitlab.medzdrav.ru/health-service/go-sdk",
-    "gitlab.medzdrav.ru/health-service/go-tools",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

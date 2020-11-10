@@ -1,11 +1,13 @@
 package redis
 
 import (
+	"chats/infrastructure"
 	"chats/models"
-	"chats/service"
+	"chats/sdk"
+	"chats/sentry"
 	"encoding/json"
 	"github.com/go-redis/redis"
-	"gitlab.medzdrav.ru/health-service/go-sdk"
+	uuid "github.com/satori/go.uuid"
 	"os"
 	"strconv"
 	"time"
@@ -26,20 +28,20 @@ func Init(attempt uint) *Redis {
 	})
 	_, err := client.Ping().Result()
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
 			Message: RedisConnectionProblem + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
 			Code:    RedisConnectionProblemCode,
 		})
 
-		service.Reconnect(RedisConnectionProblem, &attempt)
+		infrastructure.Reconnect(RedisConnectionProblem, &attempt)
 
 		return Init(attempt)
 	}
 
 	ttl, err := strconv.ParseUint(os.Getenv("REDIS_TTL"), 10, 64)
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
 			Message: RedisTTLNotExist,
 			Code:    RedisTTLNotExistCode,
@@ -53,19 +55,18 @@ func Init(attempt uint) *Redis {
 	}
 }
 
-//	deprecated
-func (r *Redis) GetUserById(id uint, user *sdk.UserModel, sdkConn *sdk.Sdk) *models.SystemError {
-	uid := strconv.FormatUint(uint64(id), 10)
+func (r *Redis) GetAccountById(id uuid.UUID, account *sdk.AccountModel, sdkConn *sdk.Sdk) *sentry.SystemError {
+	uid := uuid.UUID.String(id)
 
 	//	get from redis
-	key := "user:" + uid
+	key := "account:" + uid
 	val, _ := r.Instance.Get(key).Bytes()
 	if val == nil {
-		user.Id = id
+		account.Id = id
 		//	get from nats
-		err := sdkConn.UserById(user)
+		err := sdkConn.UserById(account)
 		if err != nil {
-			return &models.SystemError{
+			return &sentry.SystemError{
 				Error:   err.Error,
 				Message: err.Message,
 				Code:    err.Code,
@@ -73,26 +74,26 @@ func (r *Redis) GetUserById(id uint, user *sdk.UserModel, sdkConn *sdk.Sdk) *mod
 		}
 
 		//	set to redis
-		userData, _ := json.Marshal(user)
-		setErr := r.Instance.Set(key, userData, r.Ttl).Err()
+		accountData, _ := json.Marshal(account)
+		setErr := r.Instance.Set(key, accountData, r.Ttl).Err()
 		if setErr != nil {
-			redisError := &models.SystemError{
+			redisError := &sentry.SystemError{
 				Error:   setErr,
 				Message: RedisSetError,
 				Code:    RedisSetErrorCode,
-				Data:    []byte(userData),
+				Data:    []byte(accountData),
 			}
-			service.SetError(redisError)
+			infrastructure.SetError(redisError)
 
 			return redisError
 		}
 	} else {
-		err := json.Unmarshal(val, user)
+		err := json.Unmarshal(val, account)
 		if err != nil {
-			return &models.SystemError{
+			return &sentry.SystemError{
 				Error:   err,
-				Message: service.UnmarshallingError,
-				Code:    service.UnmarshallingErrorCode,
+				Message: infrastructure.UnmarshallingError,
+				Code:    infrastructure.UnmarshallingErrorCode,
 				Data:    val,
 			}
 		}
@@ -101,7 +102,7 @@ func (r *Redis) GetUserById(id uint, user *sdk.UserModel, sdkConn *sdk.Sdk) *mod
 	return nil
 }
 
-func (r *Redis) DoctorSpecialization(id uint, ds *sdk.ApiDoctorSpecializationResponesData, sdkConn *sdk.Sdk) *models.SystemError {
+func (r *Redis) DoctorSpecialization(id uint, ds *sdk.ApiDoctorSpecializationResponesData, sdkConn *sdk.Sdk) *sentry.SystemError {
 	uid := strconv.FormatUint(uint64(id), 10)
 
 	//	get from redis
@@ -110,7 +111,7 @@ func (r *Redis) DoctorSpecialization(id uint, ds *sdk.ApiDoctorSpecializationRes
 	if val == nil {
 		sdkDs, err := sdkConn.DoctorSpecialization(id)
 		if err != nil {
-			return &models.SystemError{
+			return &sentry.SystemError{
 				Error:   err.Error,
 				Message: err.Message,
 				Code:    err.Code,
@@ -124,23 +125,23 @@ func (r *Redis) DoctorSpecialization(id uint, ds *sdk.ApiDoctorSpecializationRes
 		dsData, _ := json.Marshal(ds)
 		setErr := r.Instance.Set(key, dsData, r.Ttl).Err()
 		if setErr != nil {
-			redisError := &models.SystemError{
+			redisError := &sentry.SystemError{
 				Error:   setErr,
 				Message: RedisSetError,
 				Code:    RedisSetErrorCode,
 				Data:    []byte(dsData),
 			}
-			service.SetError(redisError)
+			infrastructure.SetError(redisError)
 
 			return redisError
 		}
 	} else {
 		err := json.Unmarshal(val, ds)
 		if err != nil {
-			return &models.SystemError{
+			return &sentry.SystemError{
 				Error:   err,
-				Message: service.UnmarshallingError,
-				Code:    service.UnmarshallingErrorCode,
+				Message: infrastructure.UnmarshallingError,
+				Code:    infrastructure.UnmarshallingErrorCode,
 				Data:    val,
 			}
 		}
@@ -149,36 +150,51 @@ func (r *Redis) DoctorSpecialization(id uint, ds *sdk.ApiDoctorSpecializationRes
 	return nil
 }
 
-func (r *Redis) Chat(chat *models.Chat) {
-	uid := strconv.FormatUint(uint64(chat.ID), 10)
-	key := "chat:" + uid + ":order"
-	val, _ := r.Instance.Get(key).Bytes()
+func (r *Redis) Chat(chat *models.Chat) *sentry.SystemError {
+	uid := uuid.UUID.String(chat.Id)
+	key := "chat:" + uid
+	val, err := r.Instance.Get(key).Bytes()
 
-	if val == nil {
-		chat.ID = 0
-	} else {
-		err := json.Unmarshal(val, chat)
-		if err != nil {
-			chat.ID = 0
+	if err != nil || val == nil {
+		chat.Id = uuid.Nil
+		return &sentry.SystemError{
+			Error:   err,
+			Message: RedisSetError,
+			Code:    RedisSetErrorCode,
+			Data:    val,
 		}
 	}
+
+	err = json.Unmarshal(val, chat)
+	if err != nil {
+		chat.Id = uuid.Nil
+		return &sentry.SystemError{
+			Error:   err,
+			Message: RedisSetError,
+			Code:    RedisSetErrorCode,
+			Data:    val,
+		}
+	}
+
+	return nil
+
 }
 
-func (r *Redis) SetChat(chat *models.Chat) *models.SystemError {
-	uid := strconv.FormatUint(uint64(chat.ID), 10)
-	key := "chat:" + uid + ":order"
+func (r *Redis) SetChat(chat *models.Chat) *sentry.SystemError {
+	uid := uuid.UUID.String(chat.Id)
+	key := "chat:" + uid
 
-	marshal, _ := json.Marshal(chat) //	sorry
+	marshal, _ := json.Marshal(chat)
 
 	setErr := r.Instance.Set(key, marshal, r.Ttl).Err()
 	if setErr != nil {
-		redisError := &models.SystemError{
+		redisError := &sentry.SystemError{
 			Error:   setErr,
 			Message: RedisSetError,
 			Code:    RedisSetErrorCode,
 			Data:    marshal,
 		}
-		service.SetError(redisError)
+		infrastructure.SetError(redisError)
 
 		return redisError
 	}
@@ -186,34 +202,34 @@ func (r *Redis) SetChat(chat *models.Chat) *models.SystemError {
 	return nil
 }
 
-func (r *Redis) VagueUserById(userModel *sdk.UserModel, userType string, orderId uint, sdkConn *sdk.Sdk) *models.SystemError {
-	user := strconv.FormatUint(uint64(userModel.Id), 10)
-	order := strconv.FormatUint(uint64(orderId), 10)
-	key := "user_id:" + user + ".user_type:" + userType + ".order_id:" + order
+func (r *Redis) VagueUserById(userModel *sdk.AccountModel, role string, referenceId uuid.UUID, sdkConn *sdk.Sdk) *sentry.SystemError {
+	user := uuid.UUID.String(userModel.Id)
+	ref := uuid.UUID.String(referenceId)
+	key := "user_id:" + user + ".user_type:" + role + ".order_id:" + ref
 
 	val, _ := r.Instance.Get(key).Bytes()
 	if val == nil {
-		sdkConn.VagueUserById(userModel, userType, orderId)
+		sdkConn.VagueUserById(userModel, role, "" /*referenceId*/)
 		um, _ := json.Marshal(userModel)
 		setErr := r.Instance.Set(key, um, r.Ttl).Err()
 		if setErr != nil {
-			redisError := &models.SystemError{
+			redisError := &sentry.SystemError{
 				Error:   setErr,
 				Message: RedisSetError,
 				Code:    RedisSetErrorCode,
 				Data:    []byte(um),
 			}
-			service.SetError(redisError)
+			infrastructure.SetError(redisError)
 
 			return redisError
 		}
 	} else {
 		err := json.Unmarshal(val, userModel)
 		if err != nil {
-			return &models.SystemError{
+			return &sentry.SystemError{
 				Error:   err,
-				Message: service.UnmarshallingError,
-				Code:    service.UnmarshallingErrorCode,
+				Message: infrastructure.UnmarshallingError,
+				Code:    infrastructure.UnmarshallingErrorCode,
 				Data:    val,
 			}
 		}

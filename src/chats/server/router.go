@@ -2,7 +2,8 @@ package server
 
 import (
 	"chats/models"
-	"chats/service"
+	"chats/sentry"
+	"chats/infrastructure"
 	"encoding/json"
 )
 
@@ -31,17 +32,17 @@ func (r *Router) Dispatch(h *Hub, c *Client, clientRequest []byte) {
 	request := &models.WSChatRequest{}
 	err := json.Unmarshal(clientRequest, &request)
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
-			Message: service.UnmarshallingError,
-			Code:    service.UnmarshallingErrorCode,
+			Message: infrastructure.UnmarshallingError,
+			Code:    infrastructure.UnmarshallingErrorCode,
 		})
 
 		return
 	}
 
 	if handler, ok := r.routes[request.Type]; !ok {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   nil,
 			Message: WsEventTypeNotExists,
 			Code:    WsEventTypeNotExistsCode,

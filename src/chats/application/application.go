@@ -2,10 +2,9 @@ package application
 
 import (
 	"chats/database"
-	"chats/models"
 	"chats/sentry"
-	"chats/service"
-	"gitlab.medzdrav.ru/health-service/go-sdk"
+	"chats/infrastructure"
+	"chats/sdk"
 	"strconv"
 )
 
@@ -24,15 +23,15 @@ func Init(sentry *sentry.Sentry) *Application {
 }
 
 func sdkInit(attempt uint) (init *sdk.Sdk) {
-	init, err := sdk.Init(service.SdkOptions())
+	init, err := sdk.Init(infrastructure.SdkOptions())
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
-			Message: service.SdkConnectionError + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
-			Code:    service.SdkConnectionErrorCode,
+			Message: infrastructure.SdkConnectionError + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
+			Code:    infrastructure.SdkConnectionErrorCode,
 		})
 
-		service.Reconnect(service.SdkConnectionError, &attempt)
+		infrastructure.Reconnect(infrastructure.SdkConnectionError, &attempt)
 
 		return sdkInit(attempt)
 	}

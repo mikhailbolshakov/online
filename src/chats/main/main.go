@@ -3,7 +3,7 @@ package main
 import (
 	"chats/application"
 	"chats/server"
-	"chats/service"
+	"chats/infrastructure"
 	"context"
 	"fmt"
 	"chats/sentry"
@@ -19,11 +19,11 @@ const (
 )
 
 func main() {
-	service.SetEnvironment()
+	infrastructure.SetEnvironment()
 
 	snt, err := sentry.Init(sentry.Params{
-		Sentry:        service.SentryOptions(),
-		ReconnectTime: service.ReconnectTime(),
+		Sentry:        infrastructure.SentryOptions(),
+		ReconnectTime: infrastructure.ReconnectTime(),
 	})
 	if err != nil {
 		log.Fatal("/!\\ /!\\ /!\\", err)
@@ -53,7 +53,7 @@ func main() {
 */
 func HelloWorld() {
 	fmt.Printf("Service Chats started, version: %s \n", appVersion)
-	fmt.Printf("Listen topic: %s \n", service.BusTopic())
-	fmt.Printf("Listen inside topic: %s \n", service.InsideTopic())
-	fmt.Printf("Listen cron topic: %s \n", service.CronTopic())
+	fmt.Printf("Listen topic: %s \n", infrastructure.BusTopic())
+	fmt.Printf("Listen inside topic: %s \n", infrastructure.InsideTopic())
+	fmt.Printf("Listen cron topic: %s \n", infrastructure.CronTopic())
 }

@@ -1,6 +1,9 @@
 package database
 
-import "chats/models"
+import (
+	"chats/models"
+	uuid "github.com/satori/go.uuid"
+)
 
 const (
 	MessageStatusRecd = "recd"
@@ -18,7 +21,7 @@ func (db *Storage) NewStatus(messageStatusModel *models.ChatMessageStatus) error
 }
 
 // Возвращает статус сообщения
-func (db *Storage) getMessageStatus(messageId uint, status string) (*models.ChatMessageStatus, error) {
+func (db *Storage) getMessageStatus(messageId uuid.UUID, status string) (*models.ChatMessageStatus, error) {
 	statusModel := &models.ChatMessageStatus{}
 
 	where := "message_id = ? and status = ?"
@@ -29,7 +32,7 @@ func (db *Storage) getMessageStatus(messageId uint, status string) (*models.Chat
 }
 
 // Меняет статус сообщения на "прочитанно"
-func (db *Storage) SetReadStatus(messageId uint) error {
+func (db *Storage) SetReadStatus(messageId uuid.UUID) error {
 	statusModel, err := db.getMessageStatus(messageId, MessageStatusRecd)
 
 	if err == nil {

@@ -2,10 +2,10 @@ package database
 
 import (
 	"chats/models"
+	"chats/sdk"
 	"fmt"
 	"github.com/jinzhu/gorm"
-	"gitlab.medzdrav.ru/health-service/go-sdk"
-	"strconv"
+	uuid "github.com/satori/go.uuid"
 	"time"
 )
 
@@ -16,11 +16,11 @@ const (
 )
 
 type chatListDataItem struct {
-	Id             uint      `json:"id"`
+	Id             uuid.UUID `json:"id"`
 	Status         string    `json:"status"`
-	OrderId        uint      `json:"order_id"`
-	UserId         uint      `json:"user_id"`
-	UserType       string    `json:"user_type"`
+	ReferenceId    string `json:"reference_id"`
+	AccountId      uuid.UUID `json:"account_id"`
+	Role           string    `json:"role"`
 	InsertDate     time.Time `json:"insert_date"`
 	LastUpdateDate time.Time `json:"last_update_date"`
 }
@@ -37,30 +37,27 @@ func CatchPanic() (err error) {
 	return err
 }
 
-func (db *Storage) ChatCreate(orderId uint) (uint, error) {
-	chatModel := &models.Chat{OrderId: orderId}
-	db.Instance.Exec("set transaction isolation level serializable") //	TODO
-	tx := db.Instance.Begin()
-	err := tx.Create(chatModel).Error
-	if err != nil {
-		tx.Rollback()
-		return 0, err
+func (db *Storage) ChatCreate(chatModel *models.Chat) (uuid.UUID, error) {
+
+	result := db.Instance.Create(chatModel)
+
+	if result.Error != nil {
+		return uuid.Nil, result.Error
 	}
 
-	tx.Commit()
+	return chatModel.Id, nil
 
-	return chatModel.ID, nil
 }
 
-func (db *Storage) ChatChangeStatus(chatId uint, status string) error {
+func (db *Storage) ChatChangeStatus(chatId uuid.UUID, status string) error {
 	chatModel := &models.Chat{}
-	chatModel.ID = chatId
+	chatModel.Id = chatId
 	db.Instance.Model(chatModel).Update("status", status)
 
 	return db.Instance.Error
 }
 
-func (db *Storage) ChatDeactivateNotice(chatId uint) error {
+func (db *Storage) ChatDeactivateNotice(chatId uuid.UUID) error {
 	chatMessageModel := &models.ChatMessage{}
 
 	db.Instance.Model(chatMessageModel).
@@ -71,12 +68,12 @@ func (db *Storage) ChatDeactivateNotice(chatId uint) error {
 	return db.Instance.Error
 }
 
-func (db *Storage) GetUserChats(userId uint, limit uint16, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
+func (db *Storage) GetAccountChats(accountId uuid.UUID, limit uint16, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
 	if limit == 0 {
 		limit = CountChatsDefault
 	}
 
-	chats := []uint{}
+	chats := []uuid.UUID{}
 	result := []sdk.ChatListResponseDataItem{}
 	lastUpdateDate := db.Instance.
 		Select("created_at").
@@ -96,7 +93,7 @@ func (db *Storage) GetUserChats(userId uint, limit uint16, sdkConn *sdk.Sdk) ([]
 		Select(fields, lastUpdateDate).
 		Table("chat_subscribes cs").
 		Joins("inner join chats c on c.id = cs.chat_id").
-		Where("cs.user_id = ?", userId).
+		Where("cs.account_id = ?", accountId).
 		Limit(limit).
 		Order("cs.chat_id desc")
 
@@ -115,7 +112,7 @@ func (db *Storage) GetUserChats(userId uint, limit uint16, sdkConn *sdk.Sdk) ([]
 				ChatListDataItem: sdk.ChatListDataItem{
 					Id:             chatListDataItem.Id,
 					Status:         chatListDataItem.Status,
-					OrderId:        chatListDataItem.OrderId,
+					ReferenceId:        chatListDataItem.ReferenceId,
 					InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
 					LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
 				},
@@ -126,7 +123,7 @@ func (db *Storage) GetUserChats(userId uint, limit uint16, sdkConn *sdk.Sdk) ([]
 	}
 
 	if len(chats) > 0 {
-		opponents, err := db.GetOpponents(chats, userId, sdkConn)
+		opponents, err := db.GetOpponents(chats, accountId, sdkConn)
 		if err != nil {
 			return nil, err
 		}
@@ -143,7 +140,7 @@ func (db *Storage) GetUserChats(userId uint, limit uint16, sdkConn *sdk.Sdk) ([]
 	return result, nil
 }
 
-func (db *Storage) GetChatById(chatId uint, userId uint, sdkConn *sdk.Sdk) (*sdk.ChatListResponseDataItem, error) {
+func (db *Storage) GetChatById(chatId uuid.UUID, accountId uuid.UUID, sdkConn *sdk.Sdk) (*sdk.ChatListResponseDataItem, error) {
 	chatListDataItem := &chatListDataItem{}
 
 	fields := "c.id, " +
@@ -165,7 +162,7 @@ func (db *Storage) GetChatById(chatId uint, userId uint, sdkConn *sdk.Sdk) (*sdk
 		Table("chat_subscribes cs").
 		Joins("inner join chats c on c.id = cs.chat_id").
 		Where("cs.chat_id = ?", chatId).
-		Where("cs.user_id = ?", userId).
+		Where("cs.user_id = ?", accountId).
 		Where("cs.active = ?", SubscribeActive).
 		Find(chatListDataItem).
 		Error
@@ -177,14 +174,14 @@ func (db *Storage) GetChatById(chatId uint, userId uint, sdkConn *sdk.Sdk) (*sdk
 		ChatListDataItem: sdk.ChatListDataItem{
 			Id:             chatListDataItem.Id,
 			Status:         chatListDataItem.Status,
-			OrderId:        chatListDataItem.OrderId,
+			ReferenceId:        chatListDataItem.ReferenceId,
 			InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
 			LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
 		},
 	}
 
-	chats := []uint{chatId}
-	opponents, err := db.GetOpponents(chats, userId, sdkConn)
+	chats := []uuid.UUID{chatId}
+	opponents, err := db.GetOpponents(chats, accountId, sdkConn)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +193,7 @@ func (db *Storage) GetChatById(chatId uint, userId uint, sdkConn *sdk.Sdk) (*sdk
 	return result, nil
 }
 
-func (db *Storage) GetChatsById(chatsId []uint, userId uint, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
+func (db *Storage) GetChatsById(chatsId []uuid.UUID, accountId uuid.UUID, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
 	result := []sdk.ChatListResponseDataItem{}
 
 	items := &[]chatListDataItem{}
@@ -220,7 +217,7 @@ func (db *Storage) GetChatsById(chatsId []uint, userId uint, sdkConn *sdk.Sdk) (
 		Table("chat_subscribes cs").
 		Joins("inner join chats c on c.id = cs.chat_id").
 		Where("cs.chat_id in (?)", chatsId).
-		Where("cs.user_id = ?", userId).
+		Where("cs.user_id = ?", accountId).
 		Where("cs.active = ?", SubscribeActive).
 		Find(items).
 		Error
@@ -233,7 +230,7 @@ func (db *Storage) GetChatsById(chatsId []uint, userId uint, sdkConn *sdk.Sdk) (
 			ChatListDataItem: sdk.ChatListDataItem{
 				Id:             chatListDataItem.Id,
 				Status:         chatListDataItem.Status,
-				OrderId:        chatListDataItem.OrderId,
+				ReferenceId:        chatListDataItem.ReferenceId,
 				InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
 				LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
 			},
@@ -242,7 +239,7 @@ func (db *Storage) GetChatsById(chatsId []uint, userId uint, sdkConn *sdk.Sdk) (
 		result = append(result, *item)
 	}
 
-	opponents, err := db.GetOpponents(chatsId, userId, sdkConn)
+	opponents, err := db.GetOpponents(chatsId, accountId, sdkConn)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +255,7 @@ func (db *Storage) GetChatsById(chatsId []uint, userId uint, sdkConn *sdk.Sdk) (
 	return result, nil
 }
 
-func (db *Storage) GetChatsByOrder(data []sdk.OrderChatRequestBodyItem, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
+func (db *Storage) GetChatsByReference(data []sdk.ReferenceChatRequestBodyItem, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
 	result := []sdk.ChatListResponseDataItem{}
 	chatListDataItem, err := db.GetChatsByOrderItems(data)
 	if err != nil {
@@ -270,22 +267,22 @@ func (db *Storage) GetChatsByOrder(data []sdk.OrderChatRequestBodyItem, sdkConn 
 			ChatListDataItem: sdk.ChatListDataItem{
 				Id:             chatListDataItem.Id,
 				Status:         chatListDataItem.Status,
-				OrderId:        chatListDataItem.OrderId,
+				ReferenceId:        chatListDataItem.ReferenceId,
 				InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
 				LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
 			},
 		}
 
-		opponents := make(map[uint]models.ExpandedUserModel)
-		user := &sdk.UserModel{Id: chatListDataItem.UserId}
-		err := sdkConn.VagueUserById(user, chatListDataItem.UserType, chatListDataItem.OrderId)
+		opponents := make(map[uuid.UUID]models.ExpandedUserModel)
+		account := &sdk.AccountModel{Id: chatListDataItem.AccountId}
+		err := sdkConn.VagueUserById(account, chatListDataItem.Role, chatListDataItem.ReferenceId)
 		if err != nil {
 			return nil, err.Error
 		}
 
-		opponents[chatListDataItem.UserId] = models.ExpandedUserModel{
-			*user,
-			chatListDataItem.UserType,
+		opponents[chatListDataItem.AccountId] = models.ExpandedUserModel{
+			*account,
+			chatListDataItem.Role,
 		}
 
 		item.Opponent = opponents
@@ -296,7 +293,7 @@ func (db *Storage) GetChatsByOrder(data []sdk.OrderChatRequestBodyItem, sdkConn 
 	return result, nil
 }
 
-func (db *Storage) GetChatsByOrderItems(data []sdk.OrderChatRequestBodyItem) ([]chatListDataItem, error) {
+func (db *Storage) GetChatsByOrderItems(data []sdk.ReferenceChatRequestBodyItem) ([]chatListDataItem, error) {
 	chatListDataItem := []chatListDataItem{}
 
 	where := ""
@@ -304,8 +301,9 @@ func (db *Storage) GetChatsByOrderItems(data []sdk.OrderChatRequestBodyItem) ([]
 		if i > 0 {
 			where += " or "
 		}
-		where += "(c.order_id = " + strconv.FormatUint(uint64(item.OrderId), 10) +
-			" and cs.user_id = " + strconv.FormatUint(uint64(item.OpponentId), 10) + ")"
+		// TODO: ::uuid
+		where += "(c.reference_id = " + uuid.UUID.String(item.ReferenceId) +
+			" and cs.account_id = " + uuid.UUID.String(item.OpponentId) + ")"
 	}
 
 	query := "select distinct " +
@@ -328,17 +326,16 @@ func (db *Storage) GetChatsByOrderItems(data []sdk.OrderChatRequestBodyItem) ([]
 	return chatListDataItem, nil
 }
 
-func (db *Storage) Chat(id uint) *models.Chat {
+func (db *Storage) Chat(id uuid.UUID) *models.Chat {
 	chat := &models.Chat{}
-	chat.ID = id
+	chat.Id = id
 
 	db.Redis.Chat(chat)
-	if chat.ID > 0 {
+	if chat.Id != uuid.Nil {
 		return chat
 	} else {
 		db.Instance.First(chat, id)
 		db.Redis.SetChat(chat)
-
 		return chat
 	}
 }

@@ -1,0 +1,7 @@
+version: '3'
+
+services:
+  migrations:
+    network_mode: host
+    build: .
+

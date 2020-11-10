@@ -6,4 +6,3 @@ vendor/
 pkg/*
 src/chats/vendor
 db/dbconf.yml
-go-sdk/

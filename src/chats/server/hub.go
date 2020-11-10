@@ -3,9 +3,11 @@ package server
 import (
 	"chats/application"
 	"chats/models"
-	"chats/service"
+	"chats/sentry"
+	"chats/infrastructure"
 	"encoding/json"
-	"gitlab.medzdrav.ru/health-service/go-sdk"
+	"chats/sdk"
+	uuid "github.com/satori/go.uuid"
 	"log"
 	"sync"
 	"time"
@@ -13,9 +15,9 @@ import (
 
 type Hub struct {
 	clients        map[string]*Client
-	clientsId      map[uint]*Client
-	users          map[uint]bool
-	rooms          map[uint]*Room
+	clientsId      map[uuid.UUID]*Client
+	accounts       map[uuid.UUID]bool
+	rooms          map[uuid.UUID]*Room
 	roomMutex      sync.Mutex
 	registerChan   chan *Client
 	unregisterChan chan *Client
@@ -28,9 +30,9 @@ func NewHub(app *application.Application) *Hub {
 
 	return &Hub{
 		clients:        make(map[string]*Client),
-		clientsId:      make(map[uint]*Client),
-		users:          make(map[uint]bool),
-		rooms:          make(map[uint]*Room),
+		clientsId:      make(map[uuid.UUID]*Client),
+		accounts:       make(map[uuid.UUID]bool),
+		rooms:          make(map[uuid.UUID]*Room),
 		registerChan:   make(chan *Client),
 		unregisterChan: make(chan *Client),
 		messageChan:    make(chan *RoomMessage),
@@ -44,15 +46,15 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.registerChan:
 			h.clients[client.uniqId] = client
-			h.clientsId[client.user.Id] = client
-			h.users[client.user.Id] = true
-			log.Println(">>> client register:", client.user.Id) //	TODO
-			h.checkConnectionStatus(client.user.Id, true)
+			h.clientsId[client.account.Id] = client
+			h.accounts[client.account.Id] = true
+			log.Println(">>> client register:", client.account.Id) //	TODO
+			h.checkConnectionStatus(client.account.Id, true)
 		case client := <-h.unregisterChan:
 			go h.clientConnectionChange(client)
 			h.onClientDisconnect(client)
-			log.Println(">>> client unregister:", client.user.Id) //	TODO
-			h.checkConnectionStatus(client.user.Id, false)
+			log.Println(">>> client unregister:", client.account.Id) //	TODO
+			h.checkConnectionStatus(client.account.Id, false)
 		case message := <-h.messageChan:
 			log.Println(">>> message to client:", message.Message) //	TODO
 
@@ -62,7 +64,7 @@ func (h *Hub) Run() {
 					log.Println("Не удалось сформировать ответ клиенту")
 					log.Println(err)
 				} else {
-					go h.app.Sdk.Subject(service.InsideTopic()).Publish(answer) //	return sentry
+					go h.app.Sdk.Subject(infrastructure.InsideTopic()).Publish(answer) //	return sentry
 				}
 			}
 		}
@@ -75,16 +77,16 @@ func (h *Hub) onClientDisconnect(client *Client) {
 		h.removeClientFromRooms(client)
 		close(client.sendChan)
 
-		if !h.userHasClients(client.user) {
-			delete(h.users, client.user.Id)
-			delete(h.clientsId, client.user.Id)
+		if !h.userHasClients(client.account) {
+			delete(h.accounts, client.account.Id)
+			delete(h.clientsId, client.account.Id)
 		}
 	}
 }
 
-func (h *Hub) userHasClients(user *sdk.UserModel) bool {
+func (h *Hub) userHasClients(user *sdk.AccountModel) bool {
 	for _, otherClient := range h.clients {
-		if otherClient.user.Id == user.Id {
+		if otherClient.account.Id == user.Id {
 			return true
 		}
 	}
@@ -104,7 +106,7 @@ func (h *Hub) removeAllClients() {
 	}
 }
 
-func (h *Hub) CreateRoomIfNotExists(chatId uint) *Room {
+func (h *Hub) CreateRoomIfNotExists(chatId uuid.UUID) *Room {
 	h.roomMutex.Lock()
 	defer h.roomMutex.Unlock()
 
@@ -133,7 +135,7 @@ func (h *Hub) sendMessageToClient(client *Client, message []byte) {
 	client.send(message)
 }
 
-func (h *Hub) checkConnectionStatus(userId uint, online bool) {
+func (h *Hub) checkConnectionStatus(userId uuid.UUID, online bool) {
 	if !online {
 		if _, ok := h.clientsId[userId]; !ok {
 			go h.app.Sdk.ChangeConnectionStatus(userId, online)
@@ -149,48 +151,48 @@ func (h *Hub) clientConnectionChange(c *Client) {
 	//	todo вынести в отдельный метод
 	cronGetUserStatusRequestMessage := &models.CronGetUserStatusRequest{
 		Type: MessageTypeGetUserStatus,
-		Data: models.CronGetUserStatusRequestData{
-			UserId: c.user.Id,
+		Data: models.CronGetAccountStatusRequestData{
+			AccountId: c.account.Id,
 		},
 	}
 
 	request, err := json.Marshal(cronGetUserStatusRequestMessage)
 	if err != nil {
-		service.SetError(service.MarshalError1011(err, nil))
+		infrastructure.SetError(infrastructure.MarshalError1011(err, nil))
 		return
 	}
 
 	response, cronRequestError := h.app.Sdk.
-		Subject(service.CronTopic()).
+		Subject(infrastructure.CronTopic()).
 		Request(request)
 
 	if cronRequestError != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   cronRequestError.Error,
-			Message: service.CronResponseError,
-			Code:    service.CronResponseErrorCode,
+			Message: infrastructure.CronResponseError,
+			Code:    infrastructure.CronResponseErrorCode,
 			Data:    append(request, response...),
 		})
 		return
 	}
 
-	cronGetUserResponse := &models.CronGetUserStatusResponse{}
+	cronGetUserResponse := &models.CronGetAccountStatusResponse{}
 	err = json.Unmarshal(response, cronGetUserResponse)
 	if err != nil {
-		service.SetError(service.MarshalError1011(err, response))
+		infrastructure.SetError(infrastructure.MarshalError1011(err, response))
 		return
 	}
 
 	if !cronGetUserResponse.Online {
-		//if _, ok := h.clientsId[c.user.Id]; !ok {	//	plan B
-		opponentId := h.app.DB.LastOpponentId(c.user.Id)
+		//if _, ok := h.clientsId[c.account.Id]; !ok {	//	plan B
+		opponentId := h.app.DB.LastOpponentId(c.account.Id)
 
-		if opponentId > 0 {
+		if opponentId != uuid.Nil {
 			data := new(models.UserStatusModel)
-			data.UserId = c.user.Id
+			data.AccountId = c.account.Id
 
 			roomMessage := &RoomMessage{
-				UserId: opponentId,
+				AccountId: opponentId,
 				Message: &models.WSChatResponse{
 					Type: EventClientConnectionError,
 					Data: &data,
@@ -201,9 +203,9 @@ func (h *Hub) clientConnectionChange(c *Client) {
 		}
 
 		/*for chatId, item := range c.subscribes {
-			if item.UserType == database.UserTypeClient {
+			if item.Role == database.UserTypeClient {
 				data := new(models.UserStatusModel)
-				data.UserId = c.user.Id
+				data.AccountId = c.account.Id
 
 				roomMessage := &RoomMessage{
 					RoomId: chatId,

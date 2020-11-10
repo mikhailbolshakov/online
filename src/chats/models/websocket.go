@@ -1,6 +1,9 @@
 package models
 
-import "gitlab.medzdrav.ru/health-service/go-sdk"
+import (
+	"chats/sdk"
+	uuid "github.com/satori/go.uuid"
+)
 
 //	request default
 type WSChatRequest struct {
@@ -29,9 +32,9 @@ type WSChatErrorErrorResponse struct {
 
 //	message request
 type WSChatMessagesRequest struct {
-	UserId uint                      `json:"user_id"`
-	Type   string                    `json:"type"`
-	Data   WSChatMessagesDataRequest `json:"data"`
+	AccountId uuid.UUID                 `json:"account_id"`
+	Type      string                    `json:"type"`
+	Data      WSChatMessagesDataRequest `json:"data"`
 }
 
 type WSChatMessagesDataRequest struct {
@@ -40,7 +43,7 @@ type WSChatMessagesDataRequest struct {
 
 type WSChatMessageDataRequest struct {
 	ClientMessageId string            `json:"clientMessageId"`
-	ChatId          uint              `json:"chatId"`
+	ChatId          uuid.UUID         `json:"chatId"`
 	Type            string            `json:"type"`
 	Text            string            `json:"text"`
 	Params          map[string]string `json:"params"`
@@ -48,15 +51,15 @@ type WSChatMessageDataRequest struct {
 
 //	message response
 type WSChatMessagesDataResponse struct {
-	Messages []interface{}   `json:"messages"`
-	Users    []sdk.UserModel `json:"users"`
+	Messages []interface{}      `json:"messages"`
+	Accounts []sdk.AccountModel `json:"accounts"`
 }
 type WSChatMessagesDataMessageResponse struct {
-	Id              uint              `json:"id"`
+	Id              uuid.UUID         `json:"id"`
 	ClientMessageId string            `json:"clientMessageId"`
 	InsertDate      string            `json:"insertDate"`
-	ChatId          uint              `json:"chatId"`
-	UserId          uint              `json:"userId"`
+	ChatId          uuid.UUID         `json:"chatId"`
+	AccountId       uuid.UUID         `json:"accountId"`
 	Sender          string            `json:"sender"`
 	Status          string            `json:"status"`
 	Type            string            `json:"type"`
@@ -75,8 +78,8 @@ type WSChatMessageStatusRequest struct {
 }
 type WSChatMessageStatusDataRequest struct {
 	Status    string `json:"status"`
-	ChatId    uint   `json:"chatId"`
-	MessageId uint   `json:"messageId"`
+	ChatId    uuid.UUID   `json:"chatId"`
+	MessageId uuid.UUID   `json:"messageId"`
 }
 
 //	messageStatus response
@@ -86,8 +89,8 @@ type WSChatMessageStatusResponse struct {
 }
 type WSChatMessageStatusDataResponse struct {
 	Status    string `json:"status"`
-	ChatId    uint   `json:"chatId"`
-	MessageId uint   `json:"messageId"`
+	ChatId    uuid.UUID   `json:"chatId"`
+	MessageId uuid.UUID   `json:"messageId"`
 }
 
 //	opponentStatus request
@@ -96,7 +99,7 @@ type WSChatOpponentStatusRequest struct {
 	Data WSChatOpponentStatusDataRequest `json:"data"`
 }
 type WSChatOpponentStatusDataRequest struct {
-	ChatId uint `json:"chatId"`
+	ChatId uuid.UUID `json:"chatId"`
 }
 
 //	opponentStatus response
@@ -105,8 +108,8 @@ type WSChatOpponentStatusResponse struct {
 	Data WSChatOpponentStatusDataResponse `json:"data"`
 }
 type WSChatOpponentStatusDataResponse struct {
-	ChatId uint              `json:"chatId"`
-	Users  []UserStatusModel `json:"users"`
+	ChatId   uuid.UUID         `json:"chatId"`
+	Accounts []UserStatusModel `json:"accounts"`
 }
 
 //	join request without response
@@ -116,7 +119,7 @@ type WSChatJoinRequest struct {
 }
 
 type WSChatJoinDataRequest struct {
-	ConsultationId uint `json:"consultationId"`
+	ConsultationId string `json:"consultationId"`
 }
 
 //	typing request
@@ -125,7 +128,7 @@ type WSChatTypingRequest struct {
 	Data WSChatTypingDataRequest `json:"data"`
 }
 type WSChatTypingDataRequest struct {
-	ChatId uint   `json:"chatId"`
+	ChatId uuid.UUID   `json:"chatId"`
 	Status string `json:"status"`
 }
 
@@ -141,9 +144,9 @@ type WSChatEchoResponse struct {
 
 //	typing response
 type WSChatTypingDataResponse struct {
-	UserId  uint   `json:"userId"`
-	Message string `json:"message"`
-	Status  string `json:"status"`
+	AccountId uuid.UUID `json:"accountId"`
+	Message   string    `json:"message"`
+	Status    string    `json:"status"`
 }
 
 //	anyMessageToClient from nats [response only]
@@ -152,16 +155,16 @@ type WSMessageToMobileClientResponse struct {
 	Data WSMessageToMobileClientDataResponse `json:"data"`
 }
 type WSMessageToMobileClientDataResponse struct {
-	UserId uint              `json:"userId"`
-	Type   string            `json:"type"`
-	Data   map[string]string `json:"data"`
+	AccountId uuid.UUID         `json:"accountId"`
+	Type      string            `json:"type"`
+	Data      map[string]string `json:"data"`
 }
 
 //	system user
 type WSSystemUserRequest struct {
-	SendPush bool `json:"send_push"`
-	UserId   uint `json:"user_id"`
-	RoomId   uint `json:"room_id"`
+	SendPush  bool `json:"send_push"`
+	AccountId uuid.UUID `json:"account_id"`
+	RoomId    uint `json:"room_id"`
 }
 
 //	system subscribe user
@@ -170,15 +173,15 @@ type WSSystemUserSubscribeRequest struct {
 	Message WSSystemUserSubscribeRequestMessage `json:"message"`
 }
 type WSSystemUserSubscribeRequestMessage struct {
-	Type string                           `json:"type"`
-	Data sdk.ChatUserSubscribeRequestBody `json:"data"`
+	Type string                              `json:"type"`
+	Data sdk.ChatAccountSubscribeRequestBody `json:"data"`
 }
 
 //	Deprecated: struct is deprecated
 type WSSystemUserSubscribeRequestMessageData struct {
-	UserId   uint   `json:"user_id"`
-	ChatId   uint   `json:"chat_id"`
-	UserType string `json:"user_type"`
+	AccountId uuid.UUID `json:"user_id"`
+	ChatId    uuid.UUID `json:"chat_id"`
+	Role      string    `json:"role"`
 }
 
 //system unsubscribe user
@@ -188,20 +191,20 @@ type WSSystemUserUnsubscribeRequest struct {
 }
 
 type WSSystemUserUnsubscribeRequestMessage struct {
-	Type string                             `json:"type"`
-	Data sdk.ChatUserUnsubscribeRequestBody `json:"data"`
+	Type string                                `json:"type"`
+	Data sdk.ChatAccountUnsubscribeRequestBody `json:"data"`
 }
 
 //	other models
 
 type ExpandedUserModel struct {
-	sdk.UserModel
-	UserType string `json:"user_type"`
+	sdk.AccountModel
+	Role string `json:"role"`
 }
 
 type UserStatusModel struct {
-	UserId uint   `json:"userId"`
-	Status string `json:"status"`
+	AccountId uuid.UUID `json:"userId"`
+	Status    string    `json:"status"`
 }
 
 type CronMessage struct {
@@ -210,23 +213,23 @@ type CronMessage struct {
 }
 
 type CronSendOnlineUsers struct {
-	Type string                  `json:"type"`
-	Data CronSendOnlineUsersData `json:"data"`
+	Type string                     `json:"type"`
+	Data CronSendOnlineAccountsData `json:"data"`
 }
 
-type CronSendOnlineUsersData struct {
-	Users []uint `json:"users"`
+type CronSendOnlineAccountsData struct {
+	Accounts []uuid.UUID `json:"accounts"`
 }
 
 type CronGetUserStatusRequest struct {
-	Type string                       `json:"type"`
-	Data CronGetUserStatusRequestData `json:"data"`
+	Type string                          `json:"type"`
+	Data CronGetAccountStatusRequestData `json:"data"`
 }
 
-type CronGetUserStatusRequestData struct {
-	UserId uint `json:"user_id"`
+type CronGetAccountStatusRequestData struct {
+	AccountId uuid.UUID `json:"account_id"`
 }
 
-type CronGetUserStatusResponse struct {
+type CronGetAccountStatusResponse struct {
 	Online bool `json:"online"`
 }

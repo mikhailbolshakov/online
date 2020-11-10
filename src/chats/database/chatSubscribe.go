@@ -2,8 +2,9 @@ package database
 
 import (
 	"chats/models"
+	"chats/sdk"
 	"github.com/pkg/errors"
-	"gitlab.medzdrav.ru/health-service/go-sdk"
+	uuid "github.com/satori/go.uuid"
 	"time"
 )
 
@@ -17,34 +18,33 @@ const (
 	UserTypeBot      = "bot"
 )
 
-type SubscribeUserModel struct {
-	UserId      uint   `json:"userId"`
-	SubscribeId uint   `json:"subscribeId"`
-	UserType    string `json:"userType"`
+type SubscribeAccountModel struct {
+	AccountId   uuid.UUID `json:"accountId"`
+	SubscribeId uuid.UUID `json:"subscribeId"`
+	Role        string    `json:"role"`
 }
 
 type SubscribeChatModel struct {
 }
 
 /**
-Список подписок на чат: chatId -> SubscribeUserModel{subscribeId, userType}
+Список подписок на чат: chatId -> SubscribeAccountModel{subscribeId, userType}
 */
-func (db *Storage) UserSubscribes(userId uint) map[uint]SubscribeUserModel {
-	result := make(map[uint]SubscribeUserModel)
+func (db *Storage) AccountSubscribes(accountId uuid.UUID) map[uuid.UUID]SubscribeAccountModel {
+	result := make(map[uuid.UUID]SubscribeAccountModel)
 	subscribes := []models.ChatSubscribe{}
 
 	fields := "cs.id, " +
 		"cs.chat_id, " +
-		"cs.user_id, " +
-		"cs.user_type"
+		"cs.account_id"
 
 	query := db.Instance.
 		Select(fields).
 		Table("chat_subscribes cs").
 		Joins("left join chats c on c.id = cs.chat_id").
 		Where(
-			"cs.user_id = ? and cs.active = ? and c.status = ?",
-			userId,
+			"cs.account_id = ? and cs.active = ? and c.status = ?",
+			accountId,
 			SubscribeActive,
 			ChatStatusOpened,
 		)
@@ -59,18 +59,19 @@ func (db *Storage) UserSubscribes(userId uint) map[uint]SubscribeUserModel {
 		item := &models.ChatSubscribe{}
 		query.ScanRows(rows, item)
 
-		result[item.ChatId] = SubscribeUserModel{
-			UserId:      item.UserId,
-			SubscribeId: item.ID,
-			UserType:    item.UserType,
+		result[item.ChatId] = SubscribeAccountModel{
+
+			AccountId:   item.AccountId,
+			SubscribeId: item.Id,
+			Role:        item.Role,
 		}
 	}
 
 	for _, item := range subscribes {
-		result[item.ChatId] = SubscribeUserModel{
-			UserId:      item.UserId,
-			SubscribeId: item.ID,
-			UserType:    item.UserType,
+		result[item.ChatId] = SubscribeAccountModel{
+			AccountId:   item.AccountId,
+			SubscribeId: item.Id,
+			Role:        item.Role,
 		}
 	}
 
@@ -78,10 +79,10 @@ func (db *Storage) UserSubscribes(userId uint) map[uint]SubscribeUserModel {
 }
 
 /**
-Спиосок подписчиков на чат: userId -> SubscribeUserModel{subscribeId, userType}
+Спиосок подписчиков на чат: userId -> SubscribeAccountModel{subscribeId, userType}
 */
-func (db *Storage) ChatSubscribes(chatId uint) []SubscribeUserModel {
-	result := []SubscribeUserModel{}
+func (db *Storage) ChatSubscribes(chatId uuid.UUID) []SubscribeAccountModel {
+	result := []SubscribeAccountModel{}
 	subscribes := []models.ChatSubscribe{}
 
 	db.Instance.
@@ -90,32 +91,32 @@ func (db *Storage) ChatSubscribes(chatId uint) []SubscribeUserModel {
 		Find(&subscribes)
 
 	for _, item := range subscribes {
-		result = append(result, SubscribeUserModel{
-			UserId:      item.UserId,
-			SubscribeId: item.ID,
-			UserType:    item.UserType,
+		result = append(result, SubscribeAccountModel{
+			AccountId:   item.AccountId,
+			SubscribeId: item.Id,
+			Role:        item.Role,
 		})
 	}
 
 	return result
 }
 
-func (db *Storage) GetOpponents(chats []uint, userId uint, sdkConn *sdk.Sdk) (map[uint]models.ExpandedUserModel, error) {
+func (db *Storage) GetOpponents(chats []uuid.UUID, accountId uuid.UUID, sdkConn *sdk.Sdk) (map[uuid.UUID]models.ExpandedUserModel, error) {
 	type Opponent struct {
-		ChatId   uint   `json:"chat_id"`
-		OrderId  uint   `json:"order_id"`
-		UserId   uint   `json:"user_id"`
-		UserType string `json:"user_type"`
+		ChatId      uuid.UUID `json:"chat_id"`
+		ReferenceId string    `json:"reference_id"`
+		AccountId   uuid.UUID `json:"account_id"`
+		Role        string    `json:"role"`
 	}
-	result := make(map[uint]models.ExpandedUserModel)
+	result := make(map[uuid.UUID]models.ExpandedUserModel)
 
 	rows, err := db.Instance.
-		Select("cs.chat_id, c.order_id, cs.user_id, cs.user_type").
+		Select("cs.chat_id, c.reference_id, cs.account_id, cs.role").
 		Table("chat_subscribes cs").
 		Joins("left join chats c on c.id = cs.chat_id").
 		Where("cs.chat_id in (?)", chats).
-		Where("cs.user_id != ?", userId).
-		Where("cs.user_type != ?", UserTypeBot).
+		Where("cs.account_id != ?", accountId).
+		Where("cs.role != ?", UserTypeBot).
 		Where("active = ?", SubscribeActive).
 		Rows()
 
@@ -128,17 +129,18 @@ func (db *Storage) GetOpponents(chats []uint, userId uint, sdkConn *sdk.Sdk) (ma
 		if err := db.Instance.ScanRows(rows, opponent); err != nil {
 			return nil, err
 		} else {
-			user := &sdk.UserModel{
-				Id: opponent.UserId,
+			user := &sdk.AccountModel{
+				Id: opponent.AccountId,
 			}
-			err := sdkConn.VagueUserById(user, opponent.UserType, opponent.OrderId)
-			if err != nil {
-				return nil, err.Error
-			}
-
+			/*
+				err := sdkConn.VagueUserById(user, opponent.Role, opponent.ReferenceId)
+				if err != nil {
+					return nil, err.Error
+				}
+			*/
 			result[opponent.ChatId] = models.ExpandedUserModel{
-				UserModel: *user,
-				UserType:  opponent.UserType,
+				AccountModel: *user,
+				Role:         opponent.Role,
 			}
 		}
 	}
@@ -146,13 +148,13 @@ func (db *Storage) GetOpponents(chats []uint, userId uint, sdkConn *sdk.Sdk) (ma
 	return result, nil
 }
 
-func (db *Storage) GetChatOpponents(chatIds []uint, sdkConn *sdk.Sdk) (map[uint]models.ExpandedUserModel, error) {
+func (db *Storage) GetChatOpponents(chatIds []uuid.UUID, sdkConn *sdk.Sdk) (map[uuid.UUID]models.ExpandedUserModel, error) {
 	type Opponent struct {
-		OrderId  uint   `json:"order_id"`
-		UserId   uint   `json:"user_id"`
-		UserType string `json:"user_type"`
+		ReferenceId uuid.UUID `json:"reference_id"`
+		AccountId   uuid.UUID `json:"account_id"`
+		Role        string    `json:"role"`
 	}
-	result := make(map[uint]models.ExpandedUserModel)
+	result := make(map[uuid.UUID]models.ExpandedUserModel)
 
 	chats := db.Instance.
 		Select("chats2.id").
@@ -177,17 +179,17 @@ func (db *Storage) GetChatOpponents(chatIds []uint, sdkConn *sdk.Sdk) (map[uint]
 		if err := db.Instance.ScanRows(rows, opponent); err != nil {
 			return nil, err
 		} else {
-			user := &sdk.UserModel{
-				Id: opponent.UserId,
+			user := &sdk.AccountModel{
+				Id: opponent.AccountId,
 			}
-			err := db.Redis.VagueUserById(user, opponent.UserType, opponent.OrderId, sdkConn)
+			err := db.Redis.VagueUserById(user, opponent.Role, opponent.ReferenceId, sdkConn)
 			if err != nil {
 				return nil, err.Error
 			}
 
-			result[opponent.UserId] = models.ExpandedUserModel{
-				UserModel: *user,
-				UserType:  opponent.UserType,
+			result[opponent.AccountId] = models.ExpandedUserModel{
+				AccountModel: *user,
+				Role:         opponent.Role,
 			}
 		}
 	}
@@ -202,34 +204,49 @@ func (db *Storage) GetUserType(chatId, userId uint) string {
 		Where("user_id = ?", userId).
 		First(subscribe)
 
-	return subscribe.UserType
+	return "" //subscribe.Role
 }
 
-func (db *Storage) SubscribeUser(chatId, userId uint, userType string) error {
-	chat := &models.Chat{}
-	db.Instance.First(chat, chatId)
-	if chat.ID == 0 {
-		return errors.New(MysqlChatNotExists)
+func (db *Storage) SubscribeAccount(chat *models.Chat, accountId uuid.UUID) (uuid.UUID, error) {
+
+	if chat.Id == uuid.Nil {
+		return uuid.Nil, errors.New(MysqlChatNotExists)
 	}
 
-	subscribe := &models.ChatSubscribe{}
-	db.Instance.
-		Where("chat_id = ?", chatId).
-		Where("user_id = ?", userId).
-		First(subscribe)
+	// we don't have to do additional check to avoid round-trip
+	// we'd better to have unique constraint to check uniqueness of (user_id, chat_id)
+	// after all, it supposed to be quite rare case
+	/*
+		subscribe := &models.ChatSubscribe{}
+		db.Instance.
+			Where("chat_id = ?", chatId).
+			Where("user_id = ?", userId).
+			First(subscribe)
 
-	if subscribe.ID == 0 {
-		subscribeModel := &models.ChatSubscribe{
-			ChatId:   chatId,
-			UserId:   userId,
-			UserType: userType,
-			Active:   SubscribeActive,
-		}
+		if subscribe.ID == 0 {
+			subscribeModel := &models.ChatSubscribe{
+				ChatId:   chatId,
+				AccountId:   userId,
+				Role: userType,
+				Active:   SubscribeActive,
+			}
 
-		db.Instance.Create(subscribeModel)
-		if db.Instance.Error != nil {
-			return db.Instance.Error
+			db.Instance.Create(subscribeModel)
+			if db.Instance.Error != nil {
+				return db.Instance.Error
+			}
 		}
+	*/
+
+	subscribeModel := &models.ChatSubscribe{
+		ChatId:    chat.Id,
+		AccountId: accountId,
+		Active:    SubscribeActive,
+	}
+
+	db.Instance.Create(subscribeModel)
+	if db.Instance.Error != nil {
+		return uuid.Nil, db.Instance.Error
 	}
 
 	//	deactivate clients opponents before subscribe
@@ -243,16 +260,16 @@ func (db *Storage) SubscribeUser(chatId, userId uint, userType string) error {
 			UpdateColumn("active", SubscribeDeactive)
 	}*/
 
-	return nil
+	return subscribeModel.Id, nil
 }
 
-func (db *Storage) UnsubscribeUser(chatId, userId uint) error {
+func (db *Storage) UnsubscribeUser(chatId, accountId uuid.UUID) error {
 	subscribeModel := &models.ChatSubscribe{}
 
 	db.Instance.
 		Model(subscribeModel).
 		Where("chat_id = ?", chatId).
-		Where("user_id = ?", userId).
+		Where("account_id = ?", accountId).
 		Update("active", SubscribeDeactive)
 	if db.Instance.Error != nil {
 		return db.Instance.Error
@@ -278,8 +295,8 @@ func (db *Storage) RecdUsers(createdAt time.Time) []models.ChatSubscribe {
 	return subscribers
 }
 
-func (db *Storage) SubscribeUserChange(params *sdk.ChatUserSubscribeChangeRequest) error {
-	err := db.Check(params.Body.ChatId, params.Body.OldUserId)
+func (db *Storage) SubscribeUserChange(params *sdk.ChatAccountSubscribeChangeRequest) error {
+	err := db.Check(params.Body.ChatId, params.Body.OldAccountId)
 	if err != nil {
 		return err
 	}
@@ -287,8 +304,8 @@ func (db *Storage) SubscribeUserChange(params *sdk.ChatUserSubscribeChangeReques
 	subscribeModel := &models.ChatSubscribe{}
 	db.Instance.Model(subscribeModel).
 		Where("chat_id = ?", params.Body.ChatId).
-		Where("user_id = ?", params.Body.OldUserId).
-		Update("user_id", params.Body.NewUserId)
+		Where("user_id = ?", params.Body.OldAccountId).
+		Update("user_id", params.Body.NewAccountId)
 
 	if db.Instance.Error != nil {
 		return db.Instance.Error
@@ -297,21 +314,21 @@ func (db *Storage) SubscribeUserChange(params *sdk.ChatUserSubscribeChangeReques
 	return nil
 }
 
-func (db *Storage) Check(chatId, userId uint) error {
+func (db *Storage) Check(chatId, accountId uuid.UUID) error {
 	subscribe := &models.ChatSubscribe{}
 
 	db.Instance.
 		Where("chat_id = ?", chatId).
-		Where("user_id = ?", userId).
+		Where("account_id = ?", accountId).
 		Find(subscribe)
-	if subscribe.ID == 0 {
+	if subscribe.Id == uuid.Nil {
 		return errors.New(MysqlChatAccessDenied)
 	}
 
 	return nil
 }
 
-func (db *Storage) LastOpponentId(userId uint) uint {
+func (db *Storage) LastOpponentId(userId uuid.UUID) uuid.UUID {
 	subscribe := &models.ChatSubscribe{}
 
 	db.Instance.Raw("select cs2.user_id "+
@@ -322,5 +339,5 @@ func (db *Storage) LastOpponentId(userId uint) uint {
 		"and cs2.user_type in ('doctor', 'operator') and cs2.active = 1 "+
 		"order by c.id desc limit 1", userId).Scan(subscribe)
 
-	return subscribe.UserId
+	return uuid.Nil //subscribe.AccountId
 }

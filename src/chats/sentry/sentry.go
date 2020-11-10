@@ -23,6 +23,7 @@ func Init(params Params) (*Sentry, error) {
 		time.Sleep(params.ReconnectTime)
 		return Init(params)
 	}
+	log.Println("Sentry connected.")
 
 	loc, err := getLocation()
 	if err != nil {

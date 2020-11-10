@@ -2,10 +2,12 @@ package server
 
 import (
 	"chats/database"
+	"chats/infrastructure"
 	"chats/models"
-	"chats/service"
+	"chats/sdk"
+	"chats/sentry"
 	"encoding/json"
-	"gitlab.medzdrav.ru/health-service/go-sdk"
+	uuid "github.com/satori/go.uuid"
 	"log"
 	"time"
 )
@@ -37,44 +39,44 @@ func NewEvent() *Event {
 }
 
 func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
-	loc, err := service.Location()
+	loc, err := infrastructure.Location()
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
-			Message: service.LoadLocationError,
-			Code:    service.LoadLocationErrorCode,
+			Message: infrastructure.LoadLocationError,
+			Code:    infrastructure.LoadLocationErrorCode,
 		})
 	}
 
 	request := &models.WSChatMessagesRequest{}
 	err = json.Unmarshal(clientRequest, request)
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
-			Message: service.UnmarshallingError,
-			Code:    service.UnmarshallingErrorCode,
+			Message: infrastructure.UnmarshallingError,
+			Code:    infrastructure.UnmarshallingErrorCode,
 			Data:    clientRequest,
 		})
 
 		return
 	}
 
-	var chatId uint
+	var chatId uuid.UUID
 	messages := []interface{}{}
-	users := make(map[uint]sdk.UserModel)
-	subscribers := []database.SubscribeUserModel{}
+	accounts := make(map[uuid.UUID]sdk.AccountModel)
+	subscribers := []database.SubscribeAccountModel{}
 
 	for _, item := range request.Data.Messages {
 		if len(item.Text) > maxMessageSize {
-			service.SetError(&models.SystemError{
-				Message: service.MessageTooLongError,
-				Code:    service.MessageTooLongErrorCode,
+			infrastructure.SetError(&sentry.SystemError{
+				Message: infrastructure.MessageTooLongError,
+				Code:    infrastructure.MessageTooLongErrorCode,
 				Data:    clientRequest,
 			})
 			return
 		}
-		if item.ChatId == 0 {
-			service.SetError(&models.SystemError{
+		if item.ChatId == uuid.Nil {
+			infrastructure.SetError(&sentry.SystemError{
 				Message: database.MysqlChatIdIncorrect,
 				Code:    database.MysqlChatIdIncorrectCode,
 				Data:    clientRequest,
@@ -82,12 +84,12 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 			return
 		}
 
-		if chatId == 0 {
+		if chatId == uuid.Nil {
 			chatId = item.ChatId
 			subscribers = h.app.DB.ChatSubscribes(chatId)
 
 			if len(subscribers) == 0 {
-				service.SetError(&models.SystemError{
+				infrastructure.SetError(&sentry.SystemError{
 					Error:   err,
 					Message: database.MysqlChatSubscribeEmpty,
 					Code:    database.MysqlChatSubscribeEmptyCode,
@@ -97,19 +99,19 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 			}
 		}
 
-		var subscriberId uint = 0
+		var subscriberId = uuid.Nil
 		var subscriberType string
-		opponentsId := []uint{}
+		opponentsId := []uuid.UUID{}
 
 		for _, subscriber := range subscribers {
-			if _, ok := users[subscriber.UserId]; !ok {
-				user := &sdk.UserModel{
-					Id: subscriber.UserId,
+			if _, ok := accounts[subscriber.AccountId]; !ok {
+				user := &sdk.AccountModel{
+					Id: subscriber.AccountId,
 				}
-				consultation := h.app.DB.Chat(chatId)
-				err := h.app.Sdk.VagueUserById(user, subscriber.UserType, consultation.OrderId)
+				chat := h.app.DB.Chat(chatId)
+				err := h.app.Sdk.VagueUserById(user, subscriber.Role, chat.ReferenceId)
 				if err != nil {
-					service.SetError(&models.SystemError{
+					infrastructure.SetError(&sentry.SystemError{
 						Error:   err.Error,
 						Message: err.Message,
 						Code:    err.Code,
@@ -117,18 +119,18 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 					})
 					return
 				}
-				users[subscriber.UserId] = *user
+				accounts[subscriber.AccountId] = *user
 			}
-			if subscriber.UserId == c.user.Id {
+			if subscriber.AccountId == c.account.Id {
 				subscriberId = subscriber.SubscribeId
-				subscriberType = subscriber.UserType
+				subscriberType = subscriber.Role
 			} else {
 				opponentsId = append(opponentsId, subscriber.SubscribeId)
 			}
 		}
 
-		if subscriberId == 0 {
-			service.SetError(&models.SystemError{
+		if subscriberId == uuid.Nil {
+			infrastructure.SetError(&sentry.SystemError{
 				Error:   err,
 				Message: database.MysqlChatAccessDenied,
 				Code:    database.MysqlChatAccessDeniedCode,
@@ -147,7 +149,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 
 		err = h.app.DB.NewMessageTransact(dbMessage, item.Params, opponentsId)
 		if err != nil {
-			service.SetError(&models.SystemError{
+			infrastructure.SetError(&sentry.SystemError{
 				Error:   err,
 				Message: database.MysqlChatCreateMessageError,
 				Code:    database.MysqlChatCreateMessageErrorCode,
@@ -157,11 +159,11 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 		}
 
 		tmpMessageResponse := &models.WSChatMessagesDataMessageResponse{
-			Id:              dbMessage.ID,
+			Id:              dbMessage.Id,
 			ClientMessageId: item.ClientMessageId,
 			InsertDate:      dbMessage.CreatedAt.In(loc).Format(time.RFC3339),
 			ChatId:          chatId,
-			UserId:          c.user.Id,
+			AccountId:       c.account.Id,
 			Sender:          subscriberType,
 			Status:          database.MessageStatusRecd,
 			Type:            item.Type,
@@ -169,9 +171,9 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 		}
 		if len(dbMessage.FileId) > 0 {
 			file := &sdk.FileModel{Id: dbMessage.FileId}
-			sdkErr := h.app.Sdk.File(file, chatId, c.user.Id)
+			sdkErr := h.app.Sdk.File(file, chatId, c.account.Id)
 			if sdkErr != nil {
-				service.SetError(&models.SystemError{
+				infrastructure.SetError(&sentry.SystemError{
 					Error:   sdkErr.Error,
 					Message: sdkErr.Message,
 					Code:    sdkErr.Code,
@@ -181,7 +183,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 			}
 			tmpMessageResponseData := &models.WSChatMessagesDataMessageFileResponse{
 				WSChatMessagesDataMessageResponse: *tmpMessageResponse,
-				File: *file,
+				File:                              *file,
 			}
 			messages = append(messages, tmpMessageResponseData)
 		} else {
@@ -190,9 +192,9 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 	}
 
 	//	отправка обратно в веб-сокет
-	if chatId > 0 {
-		clients := []sdk.UserModel{}
-		for _, item := range users {
+	if chatId != uuid.Nil {
+		clients := []sdk.AccountModel{}
+		for _, item := range accounts {
 			clients = append(clients, item)
 		}
 
@@ -200,7 +202,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 			Type: EventMessage,
 			Data: models.WSChatMessagesDataResponse{
 				Messages: messages,
-				Users:    clients,
+				Accounts: clients,
 			},
 		}
 
@@ -217,14 +219,14 @@ func (e *Event) EventMessageStatus(h *Hub, c *Client, clientRequest []byte) {
 	request := &models.WSChatMessageStatusRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		service.UnmarshalRequestError1201(err, clientRequest)
+		infrastructure.UnmarshalRequestError1201(err, clientRequest)
 		return
 	}
 
 	err = h.app.DB.SetReadStatus(request.Data.MessageId)
 
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
 			Message: WsChangeMessageStatusError,
 			Code:    WsChangeMessageStatusErrorCode,
@@ -253,7 +255,7 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Client, clientRequest []byte) {
 	request := &models.WSChatOpponentStatusRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		service.SetError(service.UnmarshalRequestError1201(err, clientRequest))
+		infrastructure.SetError(infrastructure.UnmarshalRequestError1201(err, clientRequest))
 		return
 	}
 
@@ -262,41 +264,41 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Client, clientRequest []byte) {
 	users := []models.UserStatusModel{}
 
 	for _, subscribe := range subscribes {
-		user := &models.UserStatusModel{UserId: subscribe.UserId}
+		user := &models.UserStatusModel{AccountId: subscribe.AccountId}
 
-		switch subscribe.UserType {
+		switch subscribe.Role {
 		case database.UserTypeClient:
 			cronGetUserStatusRequestMessage := &models.CronGetUserStatusRequest{
 				Type: MessageTypeGetUserStatus,
-				Data: models.CronGetUserStatusRequestData{
-					UserId: subscribe.UserId,
+				Data: models.CronGetAccountStatusRequestData{
+					AccountId: subscribe.AccountId,
 				},
 			}
 
 			request, err := json.Marshal(cronGetUserStatusRequestMessage)
 			if err != nil {
-				service.SetError(service.MarshalError1011(err, clientRequest))
+				infrastructure.SetError(infrastructure.MarshalError1011(err, clientRequest))
 				return
 			}
 
 			response, cronRequestError := h.app.Sdk.
-				Subject(service.CronTopic()).
+				Subject(infrastructure.CronTopic()).
 				Request(request)
 
 			if cronRequestError != nil {
-				service.SetError(&models.SystemError{
+				infrastructure.SetError(&sentry.SystemError{
 					Error:   cronRequestError.Error,
-					Message: service.CronResponseError,
-					Code:    service.CronResponseErrorCode,
+					Message: infrastructure.CronResponseError,
+					Code:    infrastructure.CronResponseErrorCode,
 					Data:    append(request, response...),
 				})
 				return
 			}
 
-			cronGetUserResponse := &models.CronGetUserStatusResponse{}
+			cronGetUserResponse := &models.CronGetAccountStatusResponse{}
 			err = json.Unmarshal(response, cronGetUserResponse)
 			if err != nil {
-				service.SetError(service.MarshalError1011(err, response))
+				infrastructure.SetError(infrastructure.MarshalError1011(err, response))
 				return
 			}
 
@@ -320,8 +322,8 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Client, clientRequest []byte) {
 		Message: &models.WSChatResponse{
 			Type: EventOpponentStatus,
 			Data: models.WSChatOpponentStatusDataResponse{
-				ChatId: chatId,
-				Users:  users,
+				ChatId:   chatId,
+				Accounts: users,
 			},
 		},
 	}
@@ -335,11 +337,11 @@ func (e *Event) EventJoin(h *Hub, c *Client, clientRequest []byte) {
 	request := &models.WSChatJoinRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		service.UnmarshalRequestError1201(err, clientRequest)
+		infrastructure.UnmarshalRequestError1201(err, clientRequest)
 		return
 	}
 
-	go h.app.Sdk.UserConsultationJoin(request.Data.ConsultationId, c.user.Id)
+	go h.app.Sdk.UserConsultationJoin(request.Data.ConsultationId, c.account.Id)
 
 	return
 }
@@ -348,16 +350,16 @@ func (e *Event) EventTyping(h *Hub, c *Client, clientRequest []byte) {
 	request := &models.WSChatTypingRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		service.UnmarshalRequestError1201(err, clientRequest)
+		infrastructure.UnmarshalRequestError1201(err, clientRequest)
 		return
 	}
 
 	if chat, ok := h.rooms[request.Data.ChatId]; ok {
 		for _, subscriber := range chat.subscribers {
-			if subscriber.UserId == c.user.Id {
+			if subscriber.AccountId == c.account.Id {
 				var message string
 
-				switch subscriber.UserType {
+				switch subscriber.Role {
 				case database.UserTypeOperator:
 					message = EventTypingOperatorMessage
 					break
@@ -372,15 +374,15 @@ func (e *Event) EventTyping(h *Hub, c *Client, clientRequest []byte) {
 				if len(message) > 0 {
 					for _, subscriber := range chat.subscribers {
 						//	Не отправлять сообщение о тайпенге пользователю, который этот тайпинг совершает
-						if subscriber.UserId != c.user.Id {
+						if subscriber.AccountId != c.account.Id {
 							response := &RoomMessage{
-								UserId: subscriber.UserId,
+								AccountId: subscriber.AccountId,
 								Message: &models.WSChatResponse{
 									Type: EventTyping,
 									Data: models.WSChatTypingDataResponse{
-										UserId:  c.user.Id,
-										Message: message,
-										Status:  request.Data.Status,
+										AccountId: c.account.Id,
+										Message:   message,
+										Status:    request.Data.Status,
 									},
 								},
 							}
@@ -402,7 +404,7 @@ func (e *Event) EventEcho(h *Hub, c *Client, clientRequest []byte) {
 	request := &models.WSChatEchoRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		service.UnmarshalRequestError1201(err, clientRequest)
+		infrastructure.UnmarshalRequestError1201(err, clientRequest)
 		return
 	}
 

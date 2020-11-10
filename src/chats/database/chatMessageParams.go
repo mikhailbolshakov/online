@@ -2,6 +2,7 @@ package database
 
 import (
 	"chats/models"
+	uuid "github.com/satori/go.uuid"
 )
 
 type Params struct {
@@ -10,7 +11,7 @@ type Params struct {
 	Value     string `json:"value"`
 }
 
-func (db *Storage) SetParams(messageId uint, params map[string]string) error {
+func (db *Storage) SetParams(messageId uuid.UUID, params map[string]string) error {
 	if len(params) > 0 {
 		db.Instance.Exec("set transaction isolation level serializable")
 		tx := db.Instance.Begin()
@@ -33,7 +34,7 @@ func (db *Storage) SetParams(messageId uint, params map[string]string) error {
 	return nil
 }
 
-func (db *Storage) GetParams(messages []uint) (result []models.ChatMessageParams, err error) {
+func (db *Storage) GetParams(messages []uuid.UUID) (result []models.ChatMessageParams, err error) {
 	result = []models.ChatMessageParams{}
 
 	if len(messages) > 0 {
@@ -46,9 +47,9 @@ func (db *Storage) GetParams(messages []uint) (result []models.ChatMessageParams
 	return result, nil
 }
 
-func (db *Storage) GetParamsMap(messageId uint) (result map[string]string, err error) {
+func (db *Storage) GetParamsMap(messageId uuid.UUID) (result map[string]string, err error) {
 	result = map[string]string{}
-	messages := []uint{messageId}
+	messages := []uuid.UUID{messageId}
 
 	get, err := db.GetParams(messages)
 	if err != nil {

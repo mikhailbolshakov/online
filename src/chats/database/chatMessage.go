@@ -2,7 +2,8 @@ package database
 
 import (
 	"chats/models"
-	"gitlab.medzdrav.ru/health-service/go-sdk"
+	"chats/sdk"
+	uuid "github.com/satori/go.uuid"
 	"strings"
 	"time"
 )
@@ -51,7 +52,7 @@ func ValidateType(messageType string) bool {
 	return false
 }
 
-func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, params map[string]string, opponentsId []uint) error {
+func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, params map[string]string, opponentsId []uuid.UUID) error {
 	db.Instance.Exec("set transaction isolation level serializable") //	TODO
 
 	if len(messageModel.ClientMessageId) > 0 {
@@ -61,7 +62,7 @@ func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, params m
 			Where("client_message_id = ?", messageModel.ClientMessageId).
 			First(checkMessage)
 
-		if checkMessage.ID > 0 {
+		if checkMessage.Id != uuid.Nil {
 			*messageModel = *checkMessage
 			return nil
 		}
@@ -73,7 +74,7 @@ func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, params m
 		return err
 	}
 
-	err = db.SetParams(messageModel.ID, params)
+	err = db.SetParams(messageModel.Id, params)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -81,7 +82,7 @@ func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, params m
 
 	for _, opponentId := range opponentsId {
 		status := &models.ChatMessageStatus{
-			MessageId:   messageModel.ID,
+			MessageId:   messageModel.Id,
 			SubscribeId: opponentId,
 		}
 
@@ -107,7 +108,7 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 			Where("chat_id = ?", params.ChatId).
 			Find(subscribe)
 	} else {
-		err := db.Check(params.ChatId, params.UserId)
+		err := db.Check(params.ChatId, params.AccountId)
 		if err != nil {
 			return nil, err
 		}
@@ -154,7 +155,7 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 	}
 
 	var messages []sdk.ChatMessagesResponseDataItem
-	messageIds := []uint{}
+	messageIds := []uuid.UUID{}
 	for rows.Next() {
 		var message sdk.ChatMessagesResponseDataItemDb
 		query.ScanRows(rows, &message)
@@ -200,7 +201,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 			Where("chat_id = ?", params.ChatId).
 			Find(subscribe)
 	} else {
-		err := db.Check(params.ChatId, params.UserId)
+		err := db.Check(params.ChatId, params.AccountId)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +209,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 
 	loadPrevMessages := false
 
-	if params.OnlyOneChat == false && params.MessageId == 0 && params.Search == "" && params.Date == "" {
+	if params.OnlyOneChat == false && params.MessageId == uuid.Nil && params.Search == "" && params.Date == "" {
 		firstMessageChats := db.Instance.
 			Select("chats2.id").
 			Table("chats chats").
@@ -257,13 +258,13 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 
 		//все чаты мк и пациента
 		searchChats = searchChats.
-			Where("cs.user_id = ?", params.UserId).
+			Where("cs.user_id = ?", params.AccountId).
 			Where("cs.chat_id in ?", userChats)
 
 		chatsQuery = searchChats
 	} else if params.UserType == "patient" {
 		//все чаты пациента
-		searchChats = searchChats.Where("cs.user_id = ?", params.UserId)
+		searchChats = searchChats.Where("cs.user_id = ?", params.AccountId)
 		chatsQuery = chatsQuery.Where("chats.id in ?", searchChats.SubQuery())
 	} else {
 		chatsQuery = chatsQuery.Where("chats.id = ?", params.ChatId)
@@ -291,7 +292,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 	queryPrevMessages := db.Instance
 	query := db.Instance
 
-	if params.MessageId > 0 {
+	if params.MessageId != uuid.Nil {
 
 		ordering := "<"
 		if params.NewMessages {
@@ -393,7 +394,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 	}
 
 	var messages []sdk.ChatMessagesResponseDataItem
-	var messageIds []uint
+	var messageIds []uuid.UUID
 	for rows.Next() {
 		var message sdk.ChatMessagesResponseDataItemDb
 		query.ScanRows(rows, &message)

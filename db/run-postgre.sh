@@ -1,0 +1,1 @@
+docker run --name postgres --network host -e POSTGRES_PASSWORD=postgres -d postgres

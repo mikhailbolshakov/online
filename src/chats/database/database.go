@@ -1,12 +1,12 @@
 package database
 
 import (
-	"chats/models"
 	"chats/redis"
-	"chats/service"
+	"chats/sentry"
+	"chats/infrastructure"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
+	_ "github.com/jinzhu/gorm/dialects/postgres"
 	"github.com/mkevac/gopinba"
 	"log"
 	"os"
@@ -32,12 +32,12 @@ func Init() *Storage {
 }
 
 func (s *Storage) setLocation() *time.Location {
-	loc, err := service.Location()
+	loc, err := infrastructure.Location()
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
-			Message: service.LoadLocationError,
-			Code:    service.LoadLocationErrorCode,
+			Message: infrastructure.LoadLocationError,
+			Code:    infrastructure.LoadLocationErrorCode,
 		})
 	}
 
@@ -48,7 +48,7 @@ func (s *Storage) pinbaInit() *gopinba.Client {
 	pinbaHost := os.Getenv("PINBA_HOST")
 	pinba, err := gopinba.NewClient(pinbaHost)
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
 			Message: PinbaConnectionProblem,
 			Code:    PinbaConnectionProblemCode,
@@ -66,16 +66,17 @@ func (s *Storage) pinbaInit() *gopinba.Client {
 func (s *Storage) gormInit(attempt uint) *gorm.DB {
 	db, err := gorm.Open(getDbParams())
 	if err != nil {
-		service.SetError(&models.SystemError{
+		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
 			Message: MysqlConnectionProblem + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
 			Code:    MysqlConnectionProblemCode,
 		})
 
-		service.Reconnect(MysqlConnectionProblem, &attempt)
+		infrastructure.Reconnect(MysqlConnectionProblem, &attempt)
 
 		return s.gormInit(attempt)
 	}
+	log.Println("Database connected")
 
 	return db
 }
@@ -83,16 +84,15 @@ func (s *Storage) gormInit(attempt uint) *gorm.DB {
 /**
 Вытаскиваем из окружения данные для полключения к базе
 */
-func getDbParams() (string, string) {
+func getDbParams() (string, string)  {
 	drive := os.Getenv("DB_DRIVE")
 
-	params := fmt.Sprintf("%s:%s@%s(%s:%s)/%s?parseTime=true",
+	params := fmt.Sprintf("user=%s password=%s dbname=%s port=%s host=%s sslmode=disable TimeZone=Europe/Moscow",
 		os.Getenv("DB_USER"),
 		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_PROTOCOL"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
 		os.Getenv("DB_NAME"),
+		os.Getenv("DB_PORT"),
+		os.Getenv("DB_HOST"),
 	)
 
 	return drive, params

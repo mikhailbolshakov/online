@@ -2,11 +2,12 @@ package server
 
 import (
 	"chats/database"
-	"chats/models"
-	"chats/service"
+	"chats/sentry"
+	"chats/infrastructure"
 	"fmt"
 	"github.com/gorilla/websocket"
-	"gitlab.medzdrav.ru/health-service/go-sdk"
+	"chats/sdk"
+	uuid "github.com/satori/go.uuid"
 	"log"
 	"strconv"
 	"sync"
@@ -25,10 +26,10 @@ type Client struct {
 	conn            *websocket.Conn
 	sendChan        chan []byte
 	uniqId          string
-	rooms           map[uint]*Room
-	subscribes      map[uint]database.SubscribeUserModel
+	rooms           map[uuid.UUID]*Room
+	subscribes      map[uuid.UUID]database.SubscribeAccountModel
 	subscribesMutex sync.Mutex
-	user            *sdk.UserModel
+	account         *sdk.AccountModel
 }
 
 func (c *Client) send(message []byte) {
@@ -37,7 +38,7 @@ func (c *Client) send(message []byte) {
 			_, ok := r.(error)
 			if !ok {
 				err := fmt.Errorf("%v", r)
-				service.SetPanic(&models.SystemError{
+				infrastructure.SetPanic(&sentry.SystemError{
 					Error:   err,
 					Message: WsSendMessageError,
 					Code:    WsSendMessageErrorCode,
@@ -63,7 +64,7 @@ func (c *Client) Write() {
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 
 			if !ok {
-				log.Println("Хаб закрыл канал", c.user.Id) //	TODO
+				log.Println("Хаб закрыл канал", c.account.Id) //	TODO
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
@@ -90,7 +91,7 @@ func (c *Client) Write() {
 
 func (c *Client) Read() {
 	defer func() {
-		log.Println("Отключаем клиента", c.user.Id) //	TODO
+		log.Println("Отключаем клиента", c.account.Id) //	TODO
 		c.hub.unregisterChan <- c
 		c.conn.Close()
 	}()
@@ -105,7 +106,7 @@ func (c *Client) Read() {
 	for {
 		messageType, message, err := c.conn.ReadMessage()
 		if err != nil {
-			service.SetError(&models.SystemError{
+			infrastructure.SetError(&sentry.SystemError{
 				Error:   err,
 				Message: WsConnReadMessageError + "; messageType: " + strconv.Itoa(messageType),
 				Code:    WsConnReadMessageErrorCode,
@@ -122,7 +123,7 @@ func (c *Client) Read() {
 	}
 }
 
-func (c *Client) SetSubscribers(data map[uint]database.SubscribeUserModel) {
+func (c *Client) SetSubscribers(data map[uuid.UUID]database.SubscribeAccountModel) {
 	c.subscribesMutex.Lock()
 	c.subscribes = data
 	c.subscribesMutex.Unlock()
