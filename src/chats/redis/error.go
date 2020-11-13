@@ -9,4 +9,6 @@ const (
 	RedisSetErrorCode          = 510
 	RedisTTLNotExist           = "Не передана переменная окружения REDIS_TTL"
 	RedisTTLNotExistCode       = 520
+	RedisGetError              = "Ошибка получения из redis"
+	RedisGetErrorCode          = 530
 )

@@ -1,8 +1,10 @@
 package database
 
 import (
+	"chats/converter"
 	"chats/models"
 	"chats/sdk"
+	"chats/sentry"
 	"github.com/pkg/errors"
 	uuid "github.com/satori/go.uuid"
 	"time"
@@ -52,7 +54,7 @@ func (db *Storage) AccountSubscribes(accountId uuid.UUID) map[uuid.UUID]Subscrib
 	rows, err := query.Rows()
 	defer rows.Close()
 	if err != nil {
-		return nil
+		return result
 	}
 
 	for rows.Next() {
@@ -101,14 +103,14 @@ func (db *Storage) ChatSubscribes(chatId uuid.UUID) []SubscribeAccountModel {
 	return result
 }
 
-func (db *Storage) GetOpponents(chats []uuid.UUID, accountId uuid.UUID, sdkConn *sdk.Sdk) (map[uuid.UUID]models.ExpandedUserModel, error) {
+func (db *Storage) GetOpponents(chats []uuid.UUID, accountId uuid.UUID) (map[uuid.UUID]models.ExpandedAccountModel, *sentry.SystemError) {
 	type Opponent struct {
 		ChatId      uuid.UUID `json:"chat_id"`
 		ReferenceId string    `json:"reference_id"`
 		AccountId   uuid.UUID `json:"account_id"`
 		Role        string    `json:"role"`
 	}
-	result := make(map[uuid.UUID]models.ExpandedUserModel)
+	result := make(map[uuid.UUID]models.ExpandedAccountModel)
 
 	rows, err := db.Instance.
 		Select("cs.chat_id, c.reference_id, cs.account_id, cs.role").
@@ -121,26 +123,25 @@ func (db *Storage) GetOpponents(chats []uuid.UUID, accountId uuid.UUID, sdkConn 
 		Rows()
 
 	if err != nil {
-		return nil, err
+		return nil, &sentry.SystemError{
+			Error: err,
+		}
 	}
 
 	for rows.Next() {
 		opponent := &Opponent{}
 		if err := db.Instance.ScanRows(rows, opponent); err != nil {
-			return nil, err
+			return nil, &sentry.SystemError{Error: err}
 		} else {
-			user := &sdk.AccountModel{
-				Id: opponent.AccountId,
+
+			accountModel, err := db.GetAccount(opponent.AccountId, "")
+			if err != nil {
+				return nil, err
 			}
-			/*
-				err := sdkConn.VagueUserById(user, opponent.Role, opponent.ReferenceId)
-				if err != nil {
-					return nil, err.Error
-				}
-			*/
-			result[opponent.ChatId] = models.ExpandedUserModel{
-				AccountModel: *user,
-				Role:         opponent.Role,
+
+			result[opponent.ChatId] = models.ExpandedAccountModel{
+				Account: *converter.ConvertAccountFromModel(accountModel),
+				Role:    opponent.Role,
 			}
 		}
 	}
@@ -148,19 +149,19 @@ func (db *Storage) GetOpponents(chats []uuid.UUID, accountId uuid.UUID, sdkConn 
 	return result, nil
 }
 
-func (db *Storage) GetChatOpponents(chatIds []uuid.UUID, sdkConn *sdk.Sdk) (map[uuid.UUID]models.ExpandedUserModel, error) {
+func (db *Storage) GetChatOpponents(chatIds []uuid.UUID, sdkConn *sdk.Sdk) (map[uuid.UUID]models.ExpandedAccountModel, *sentry.SystemError) {
 	type Opponent struct {
 		ReferenceId uuid.UUID `json:"reference_id"`
 		AccountId   uuid.UUID `json:"account_id"`
 		Role        string    `json:"role"`
 	}
-	result := make(map[uuid.UUID]models.ExpandedUserModel)
+	result := make(map[uuid.UUID]models.ExpandedAccountModel)
 
 	chats := db.Instance.
 		Select("chats2.id").
 		Table("chats chats").
 		Joins("left join chats chats2 on chats2.order_id = chats.order_id").
-		Where("chats.id in (?)", chatIds).SubQuery()
+		Where("chats.id in (?)", chatIds)
 
 	rows, err := db.Instance.
 		Select("c.order_id, cs.user_id, cs.user_type").
@@ -171,25 +172,23 @@ func (db *Storage) GetChatOpponents(chatIds []uuid.UUID, sdkConn *sdk.Sdk) (map[
 		Rows()
 
 	if err != nil {
-		return nil, err
+		return nil, &sentry.SystemError{Error: err}
 	}
 
 	for rows.Next() {
 		opponent := &Opponent{}
 		if err := db.Instance.ScanRows(rows, opponent); err != nil {
-			return nil, err
+			return nil, &sentry.SystemError{Error: err}
 		} else {
-			user := &sdk.AccountModel{
-				Id: opponent.AccountId,
-			}
-			err := db.Redis.VagueUserById(user, opponent.Role, opponent.ReferenceId, sdkConn)
+
+			accountModel, err := db.GetAccount(opponent.AccountId, "")
 			if err != nil {
-				return nil, err.Error
+				return nil, err
 			}
 
-			result[opponent.AccountId] = models.ExpandedUserModel{
-				AccountModel: *user,
-				Role:         opponent.Role,
+			result[opponent.AccountId] = models.ExpandedAccountModel{
+				Account: *converter.ConvertAccountFromModel(accountModel),
+				Role:    opponent.Role,
 			}
 		}
 	}
@@ -197,21 +196,17 @@ func (db *Storage) GetChatOpponents(chatIds []uuid.UUID, sdkConn *sdk.Sdk) (map[
 	return result, nil
 }
 
-func (db *Storage) GetUserType(chatId, userId uint) string {
+func (db *Storage) GetAccountRole(chatId, accountId uuid.UUID) string {
 	subscribe := &models.ChatSubscribe{}
 	db.Instance.
 		Where("chat_id = ?", chatId).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", accountId).
 		First(subscribe)
 
-	return "" //subscribe.Role
+	return subscribe.Role
 }
 
-func (db *Storage) SubscribeAccount(chat *models.Chat, accountId uuid.UUID) (uuid.UUID, error) {
-
-	if chat.Id == uuid.Nil {
-		return uuid.Nil, errors.New(MysqlChatNotExists)
-	}
+func (db *Storage) SubscribeAccount(subscribeModel *models.ChatSubscribe) (uuid.UUID, error) {
 
 	// we don't have to do additional check to avoid round-trip
 	// we'd better to have unique constraint to check uniqueness of (user_id, chat_id)
@@ -237,12 +232,6 @@ func (db *Storage) SubscribeAccount(chat *models.Chat, accountId uuid.UUID) (uui
 			}
 		}
 	*/
-
-	subscribeModel := &models.ChatSubscribe{
-		ChatId:    chat.Id,
-		AccountId: accountId,
-		Active:    SubscribeActive,
-	}
 
 	db.Instance.Create(subscribeModel)
 	if db.Instance.Error != nil {

@@ -36,4 +36,13 @@ const (
 	PinbaConnectionProblemCode        = 381
 	MysqlChatAccessDenied             = "Пользователь не подписан на чат"
 	MysqlChatAccessDeniedCode         = 501
+
+	DbAccountOnlineStatusUpdateError = "Ошибка при обновлении online статуса"
+	DbAccountOnlineStatusUpdateErrorCode = 601
+	DbAccountOnlineStatusGetError = "Ошибка при получении online статуса"
+	DbAccountOnlineStatusGetErrorCode = 602
+	DbAccountOnlineStatusGetMoreThenOneError = "Найдено более одного online статуса"
+	DbAccountOnlineStatusGetMoreThenOneErrorCode = 603
+	DbAccountOnlineStatusGetNotFoundError = "online статус не найден"
+	DbAccountOnlineStatusGetNotFoundErrorCode = 604
 )

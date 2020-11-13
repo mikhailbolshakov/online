@@ -1,6 +1,7 @@
 package server
 
 import (
+	"chats/converter"
 	"chats/database"
 	"chats/infrastructure"
 	"chats/models"
@@ -63,7 +64,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 
 	var chatId uuid.UUID
 	messages := []interface{}{}
-	accounts := make(map[uuid.UUID]sdk.AccountModel)
+	accounts := make(map[uuid.UUID]sdk.Account)
 	subscribers := []database.SubscribeAccountModel{}
 
 	for _, item := range request.Data.Messages {
@@ -105,21 +106,14 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 
 		for _, subscriber := range subscribers {
 			if _, ok := accounts[subscriber.AccountId]; !ok {
-				user := &sdk.AccountModel{
-					Id: subscriber.AccountId,
-				}
-				chat := h.app.DB.Chat(chatId)
-				err := h.app.Sdk.VagueUserById(user, subscriber.Role, chat.ReferenceId)
+
+				account, err := h.app.DB.GetAccount(subscriber.AccountId, "")
+
 				if err != nil {
-					infrastructure.SetError(&sentry.SystemError{
-						Error:   err.Error,
-						Message: err.Message,
-						Code:    err.Code,
-						Data:    err.Data,
-					})
+					infrastructure.SetError(err)
 					return
 				}
-				accounts[subscriber.AccountId] = *user
+				accounts[subscriber.AccountId] = *converter.ConvertAccountFromModel(account)
 			}
 			if subscriber.AccountId == c.account.Id {
 				subscriberId = subscriber.SubscribeId
@@ -139,22 +133,25 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 			return
 		}
 
+		paramsJson, err := json.Marshal(item.Params)
+		if err != nil {
+			infrastructure.SetError(&sentry.SystemError{Error: err})
+		}
+
+		id, _ := uuid.NewV4()
 		dbMessage := &models.ChatMessage{
+			Id:              id,
 			ClientMessageId: item.ClientMessageId,
 			ChatId:          chatId,
 			Type:            item.Type,
 			SubscribeId:     subscriberId,
 			Message:         item.Text,
+			Params:          string(paramsJson),
 		}
 
-		err = h.app.DB.NewMessageTransact(dbMessage, item.Params, opponentsId)
-		if err != nil {
-			infrastructure.SetError(&sentry.SystemError{
-				Error:   err,
-				Message: database.MysqlChatCreateMessageError,
-				Code:    database.MysqlChatCreateMessageErrorCode,
-				Data:    clientRequest,
-			})
+		sentryErr := h.app.DB.NewMessageTransact(dbMessage, opponentsId)
+		if sentryErr != nil {
+			infrastructure.SetError(sentryErr)
 			return
 		}
 
@@ -193,7 +190,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 
 	//	отправка обратно в веб-сокет
 	if chatId != uuid.Nil {
-		clients := []sdk.AccountModel{}
+		clients := []sdk.Account{}
 		for _, item := range accounts {
 			clients = append(clients, item)
 		}
@@ -261,10 +258,10 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Client, clientRequest []byte) {
 
 	chatId := request.Data.ChatId
 	subscribes := h.app.DB.ChatSubscribes(chatId)
-	users := []models.UserStatusModel{}
+	users := []models.AccountStatusModel{}
 
 	for _, subscribe := range subscribes {
-		user := &models.UserStatusModel{AccountId: subscribe.AccountId}
+		user := &models.AccountStatusModel{AccountId: subscribe.AccountId}
 
 		switch subscribe.Role {
 		case database.UserTypeClient:
@@ -341,7 +338,7 @@ func (e *Event) EventJoin(h *Hub, c *Client, clientRequest []byte) {
 		return
 	}
 
-	go h.app.Sdk.UserConsultationJoin(request.Data.ConsultationId, c.account.Id)
+	//go h.app.Sdk.UserConsultationJoin(request.Data.ConsultationId, c.account.Id)
 
 	return
 }

@@ -5,8 +5,11 @@ import (
 	"chats/sentry"
 	"chats/infrastructure"
 	"fmt"
-	"github.com/jinzhu/gorm"
-	_ "github.com/jinzhu/gorm/dialects/postgres"
+	"gorm.io/gorm/logger"
+
+	//"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
+	"gorm.io/driver/postgres"
 	"github.com/mkevac/gopinba"
 	"log"
 	"os"
@@ -64,7 +67,27 @@ func (s *Storage) pinbaInit() *gopinba.Client {
 }
 
 func (s *Storage) gormInit(attempt uint) *gorm.DB {
-	db, err := gorm.Open(getDbParams())
+
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s port=%s host=%s sslmode=disable TimeZone=Europe/Moscow",
+		os.Getenv("DB_USER"),
+		os.Getenv("DB_PASSWORD"),
+		os.Getenv("DB_NAME"),
+		os.Getenv("DB_PORT"),
+		os.Getenv("DB_HOST"),
+	)
+
+	cfg := &gorm.Config{
+		Logger: logger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
+			logger.Config{
+				SlowThreshold: time.Second,   // Slow SQL threshold
+				LogLevel:      logger.Info,   // Log level
+				Colorful:      false,         // Disable color
+			},
+		),
+	}
+
+	db, err := gorm.Open(postgres.Open(dsn), cfg)
 	if err != nil {
 		infrastructure.SetError(&sentry.SystemError{
 			Error:   err,
@@ -81,19 +104,4 @@ func (s *Storage) gormInit(attempt uint) *gorm.DB {
 	return db
 }
 
-/**
-Вытаскиваем из окружения данные для полключения к базе
-*/
-func getDbParams() (string, string)  {
-	drive := os.Getenv("DB_DRIVE")
 
-	params := fmt.Sprintf("user=%s password=%s dbname=%s port=%s host=%s sslmode=disable TimeZone=Europe/Moscow",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_NAME"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_HOST"),
-	)
-
-	return drive, params
-}

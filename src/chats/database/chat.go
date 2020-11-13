@@ -1,8 +1,10 @@
 package database
 
 import (
+	"chats/converter"
 	"chats/models"
 	"chats/sdk"
+	"chats/sentry"
 	"fmt"
 	"github.com/jinzhu/gorm"
 	uuid "github.com/satori/go.uuid"
@@ -18,7 +20,7 @@ const (
 type chatListDataItem struct {
 	Id             uuid.UUID `json:"id"`
 	Status         string    `json:"status"`
-	ReferenceId    string `json:"reference_id"`
+	ReferenceId    string    `json:"reference_id"`
 	AccountId      uuid.UUID `json:"account_id"`
 	Role           string    `json:"role"`
 	InsertDate     time.Time `json:"insert_date"`
@@ -37,27 +39,29 @@ func CatchPanic() (err error) {
 	return err
 }
 
-func (db *Storage) ChatCreate(chatModel *models.Chat) (uuid.UUID, error) {
+func (db *Storage) ChatCreate(chatModel *models.Chat) (uuid.UUID, *sentry.SystemError) {
 
 	result := db.Instance.Create(chatModel)
 
 	if result.Error != nil {
-		return uuid.Nil, result.Error
+		return uuid.Nil, &sentry.SystemError{Error: result.Error}
 	}
+
+	db.Redis.SetChat(chatModel)
 
 	return chatModel.Id, nil
 
 }
 
-func (db *Storage) ChatChangeStatus(chatId uuid.UUID, status string) error {
+func (db *Storage) ChatChangeStatus(chatId uuid.UUID, status string) *sentry.SystemError {
 	chatModel := &models.Chat{}
 	chatModel.Id = chatId
 	db.Instance.Model(chatModel).Update("status", status)
 
-	return db.Instance.Error
+	return &sentry.SystemError{Error: db.Instance.Error}
 }
 
-func (db *Storage) ChatDeactivateNotice(chatId uuid.UUID) error {
+func (db *Storage) ChatDeactivateNotice(chatId uuid.UUID) *sentry.SystemError {
 	chatMessageModel := &models.ChatMessage{}
 
 	db.Instance.Model(chatMessageModel).
@@ -65,54 +69,57 @@ func (db *Storage) ChatDeactivateNotice(chatId uuid.UUID) error {
 		Where("chat_id = ?", chatId).
 		Update("deleted_at", gorm.Expr("now()"))
 
-	return db.Instance.Error
+	return &sentry.SystemError{Error: db.Instance.Error}
 }
 
-func (db *Storage) GetAccountChats(accountId uuid.UUID, limit uint16, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
+func (db *Storage) GetAccountChats(accountId uuid.UUID, limit int) ([]sdk.ChatListResponseDataItem, *sentry.SystemError) {
+
 	if limit == 0 {
 		limit = CountChatsDefault
 	}
 
-	chats := []uuid.UUID{}
-	result := []sdk.ChatListResponseDataItem{}
-	lastUpdateDate := db.Instance.
-		Select("created_at").
-		Table("chat_messages cm").
-		Where("cm.chat_id = c.id").
-		Where("cm.deleted_at IS null").
-		Order("id desc").
-		Limit("1").SubQuery()
+	var chats []uuid.UUID
+	var result []sdk.ChatListResponseDataItem
 
-	fields := "c.id, " +
-		"c.status, " +
-		"c.order_id, " +
-		"c.created_at as insert_date, " +
-		"IFNULL(?, c.created_at) as last_update_date"
+	var sql = `
+		select
+			c.id,
+			c.status,
+			c.reference_id,
+			c.created_at as insert_date,
+			coalesce((select max(cm.created_at)
+								from chat_messages cm
+								where cm.chat_id = c.id
+								and cm.deleted_at is null
+			), c.created_at) as last_update_date
+		from
+			chat_subscribes cs
+		inner join chats c on
+			c.id = cs.chat_id
+		where
+			cs.account_id = ?::uuid
+		order by cs.created_at desc
+		limit ?`
 
-	query := db.Instance.
-		Select(fields, lastUpdateDate).
-		Table("chat_subscribes cs").
-		Joins("inner join chats c on c.id = cs.chat_id").
-		Where("cs.account_id = ?", accountId).
-		Limit(limit).
-		Order("cs.chat_id desc")
+	rows, err := db.Instance.
+		Raw(sql, accountId, limit).
+		Rows()
 
-	rows, err := query.Rows()
 	defer rows.Close()
 	if err != nil {
-		return nil, err
+		return nil, &sentry.SystemError{Error: err}
 	}
 
 	for rows.Next() {
 		chatListDataItem := chatListDataItem{}
 		if err := db.Instance.ScanRows(rows, &chatListDataItem); err != nil {
-			return nil, err
+			return nil, &sentry.SystemError{Error: err}
 		} else {
 			ChatListResponseDataItem := &sdk.ChatListResponseDataItem{
 				ChatListDataItem: sdk.ChatListDataItem{
 					Id:             chatListDataItem.Id,
 					Status:         chatListDataItem.Status,
-					ReferenceId:        chatListDataItem.ReferenceId,
+					ReferenceId:    chatListDataItem.ReferenceId,
 					InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
 					LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
 				},
@@ -123,7 +130,7 @@ func (db *Storage) GetAccountChats(accountId uuid.UUID, limit uint16, sdkConn *s
 	}
 
 	if len(chats) > 0 {
-		opponents, err := db.GetOpponents(chats, accountId, sdkConn)
+		opponents, err := db.GetOpponents(chats, accountId)
 		if err != nil {
 			return nil, err
 		}
@@ -140,89 +147,55 @@ func (db *Storage) GetAccountChats(accountId uuid.UUID, limit uint16, sdkConn *s
 	return result, nil
 }
 
-func (db *Storage) GetChatById(chatId uuid.UUID, accountId uuid.UUID, sdkConn *sdk.Sdk) (*sdk.ChatListResponseDataItem, error) {
-	chatListDataItem := &chatListDataItem{}
+func (db *Storage) GetChatById(chatId uuid.UUID, accountId uuid.UUID) (*sdk.ChatListResponseDataItem, *sentry.SystemError) {
 
-	fields := "c.id, " +
-		"c.status, " +
-		"c.order_id, " +
-		"c.created_at as insert_date, " +
-		"IFNULL(?, c.created_at) as last_update_date"
-
-	lastUpdateDate := db.Instance.
-		Select("created_at").
-		Table("chat_messages cm").
-		Where("cm.chat_id = c.id").
-		Where("cm.deleted_at IS null").
-		Order("cm.id desc").
-		Limit("1").SubQuery()
-
-	err := db.Instance.
-		Select(fields, lastUpdateDate).
-		Table("chat_subscribes cs").
-		Joins("inner join chats c on c.id = cs.chat_id").
-		Where("cs.chat_id = ?", chatId).
-		Where("cs.user_id = ?", accountId).
-		Where("cs.active = ?", SubscribeActive).
-		Find(chatListDataItem).
-		Error
+	chatsId := []uuid.UUID {chatId}
+	chats, err := db.GetChatsById(chatsId, accountId)
 	if err != nil {
 		return nil, err
 	}
 
-	result := &sdk.ChatListResponseDataItem{
-		ChatListDataItem: sdk.ChatListDataItem{
-			Id:             chatListDataItem.Id,
-			Status:         chatListDataItem.Status,
-			ReferenceId:        chatListDataItem.ReferenceId,
-			InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
-			LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
-		},
+	if len(chats) >= 1 {
+		item := chats[0]
+		return &item, nil
+	} else {
+		return &sdk.ChatListResponseDataItem{}, nil
 	}
 
-	chats := []uuid.UUID{chatId}
-	opponents, err := db.GetOpponents(chats, accountId, sdkConn)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(opponents) > 0 {
-		result.Opponent = opponents[chatId]
-	}
-
-	return result, nil
 }
 
-func (db *Storage) GetChatsById(chatsId []uuid.UUID, accountId uuid.UUID, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
+func (db *Storage) GetChatsById(chatsId []uuid.UUID, accountId uuid.UUID) ([]sdk.ChatListResponseDataItem, *sentry.SystemError) {
 	result := []sdk.ChatListResponseDataItem{}
 
 	items := &[]chatListDataItem{}
 
-	fields := "c.id, " +
-		"c.status, " +
-		"c.order_id, " +
-		"c.created_at as insert_date, " +
-		"IFNULL(?, c.created_at) as last_update_date"
-
-	lastUpdateDate := db.Instance.
-		Select("created_at").
-		Table("chat_messages cm").
-		Where("cm.chat_id = c.id").
-		Where("cm.deleted_at IS null").
-		Order("cm.id desc").
-		Limit("1").SubQuery()
+	var sql = `
+		select
+			c.id,
+			c.status,
+			c.reference_id,
+			c.created_at as insert_date,
+			coalesce((select max(cm.created_at)
+								from chat_messages cm
+								where cm.chat_id = c.id
+								and cm.deleted_at is null
+			), c.created_at) as last_update_date
+		from
+			chat_subscribes cs
+		inner join chats c on
+			c.id = cs.chat_id
+		where
+			cs.chat_id in (?)
+			and cs.account_id = ?::uuid
+			and cs.active = ?`
 
 	err := db.Instance.
-		Select(fields, lastUpdateDate).
-		Table("chat_subscribes cs").
-		Joins("inner join chats c on c.id = cs.chat_id").
-		Where("cs.chat_id in (?)", chatsId).
-		Where("cs.user_id = ?", accountId).
-		Where("cs.active = ?", SubscribeActive).
+		Raw(sql, chatsId, accountId, SubscribeActive).
 		Find(items).
 		Error
+
 	if err != nil {
-		return nil, err
+		return nil, &sentry.SystemError{Error: err}
 	}
 
 	for _, chatListDataItem := range *items {
@@ -230,7 +203,7 @@ func (db *Storage) GetChatsById(chatsId []uuid.UUID, accountId uuid.UUID, sdkCon
 			ChatListDataItem: sdk.ChatListDataItem{
 				Id:             chatListDataItem.Id,
 				Status:         chatListDataItem.Status,
-				ReferenceId:        chatListDataItem.ReferenceId,
+				ReferenceId:    chatListDataItem.ReferenceId,
 				InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
 				LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
 			},
@@ -239,9 +212,9 @@ func (db *Storage) GetChatsById(chatsId []uuid.UUID, accountId uuid.UUID, sdkCon
 		result = append(result, *item)
 	}
 
-	opponents, err := db.GetOpponents(chatsId, accountId, sdkConn)
-	if err != nil {
-		return nil, err
+	opponents, sentryErr := db.GetOpponents(chatsId, accountId)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	for i, item := range result {
@@ -255,9 +228,9 @@ func (db *Storage) GetChatsById(chatsId []uuid.UUID, accountId uuid.UUID, sdkCon
 	return result, nil
 }
 
-func (db *Storage) GetChatsByReference(data []sdk.ReferenceChatRequestBodyItem, sdkConn *sdk.Sdk) ([]sdk.ChatListResponseDataItem, error) {
+func (db *Storage) GetChatsByReference(data []sdk.ReferenceChatRequestBodyItem) ([]sdk.ChatListResponseDataItem, *sentry.SystemError) {
 	result := []sdk.ChatListResponseDataItem{}
-	chatListDataItem, err := db.GetChatsByOrderItems(data)
+	chatListDataItem, err := db.GetChatsByReferenceItems(data)
 	if err != nil {
 		return nil, err
 	}
@@ -267,21 +240,21 @@ func (db *Storage) GetChatsByReference(data []sdk.ReferenceChatRequestBodyItem, 
 			ChatListDataItem: sdk.ChatListDataItem{
 				Id:             chatListDataItem.Id,
 				Status:         chatListDataItem.Status,
-				ReferenceId:        chatListDataItem.ReferenceId,
+				ReferenceId:    chatListDataItem.ReferenceId,
 				InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
 				LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
 			},
 		}
 
-		opponents := make(map[uuid.UUID]models.ExpandedUserModel)
-		account := &sdk.AccountModel{Id: chatListDataItem.AccountId}
-		err := sdkConn.VagueUserById(account, chatListDataItem.Role, chatListDataItem.ReferenceId)
+		opponents := make(map[uuid.UUID]models.ExpandedAccountModel)
+
+		account, err := db.GetAccount(chatListDataItem.AccountId, "")
 		if err != nil {
-			return nil, err.Error
+			return nil, err
 		}
 
-		opponents[chatListDataItem.AccountId] = models.ExpandedUserModel{
-			*account,
+		opponents[chatListDataItem.AccountId] = models.ExpandedAccountModel{
+			*converter.ConvertAccountFromModel(account),
 			chatListDataItem.Role,
 		}
 
@@ -293,7 +266,7 @@ func (db *Storage) GetChatsByReference(data []sdk.ReferenceChatRequestBodyItem, 
 	return result, nil
 }
 
-func (db *Storage) GetChatsByOrderItems(data []sdk.ReferenceChatRequestBodyItem) ([]chatListDataItem, error) {
+func (db *Storage) GetChatsByReferenceItems(data []sdk.ReferenceChatRequestBodyItem) ([]chatListDataItem, *sentry.SystemError) {
 	chatListDataItem := []chatListDataItem{}
 
 	where := ""
@@ -301,8 +274,8 @@ func (db *Storage) GetChatsByOrderItems(data []sdk.ReferenceChatRequestBodyItem)
 		if i > 0 {
 			where += " or "
 		}
-		// TODO: ::uuid
-		where += "(c.reference_id = " + uuid.UUID.String(item.ReferenceId) +
+
+		where += "(c.reference_id = " + item.ReferenceId +
 			" and cs.account_id = " + uuid.UUID.String(item.OpponentId) + ")"
 	}
 
@@ -320,7 +293,7 @@ func (db *Storage) GetChatsByOrderItems(data []sdk.ReferenceChatRequestBodyItem)
 		Scan(&chatListDataItem).
 		Error
 	if err != nil {
-		return nil, err
+		return nil, &sentry.SystemError{Error: err}
 	}
 
 	return chatListDataItem, nil

@@ -93,6 +93,10 @@ func (ws *WsServer) Router(request []byte) ([]byte, *sentry.SystemError) {
 	switch strings.ToUpper(clientRequest.Method) {
 	case http.MethodGet:
 		switch clientRequest.Path {
+
+		case "/accounts/account":
+			return ws.getAccountById(request)
+
 		case "/chats/chats":
 			return ws.getChatChats(request)
 
@@ -100,7 +104,7 @@ func (ws *WsServer) Router(request []byte) ([]byte, *sentry.SystemError) {
 			return ws.getChatById(request)
 
 		case "/order/chats":
-			return ws.ChatByOrder(request)
+			return ws.ChatByReference(request)
 
 		case "/chats/info":
 			return ws.getChatsInfo(request)
@@ -120,7 +124,7 @@ func (ws *WsServer) Router(request []byte) ([]byte, *sentry.SystemError) {
 	case http.MethodPost:
 		switch clientRequest.Path {
 
-		case "/account":
+		case "/accounts/account":
 			return ws.createAccount(request)
 
 		case "/chats/new":
@@ -133,7 +137,7 @@ func (ws *WsServer) Router(request []byte) ([]byte, *sentry.SystemError) {
 			return ws.setChatAccountSubscribe(request)
 
 		case "/chats/account/unsubscribe":
-			return ws.setChatUserUnsubscribe(request)
+			return ws.setChatAccountUnsubscribe(request)
 
 		case "/chats/message":
 			return ws.setChatMessage(request)
@@ -152,10 +156,13 @@ func (ws *WsServer) Router(request []byte) ([]byte, *sentry.SystemError) {
 		switch clientRequest.Path {
 
 		case "/chats/account/subscribe":
-			return ws.changeChatUserSubscribe(request)
+			return ws.changeChatAccountSubscribe(request)
 
 		case "/account":
 			return ws.updateAccount(request)
+
+		case "/account/online-status":
+			return ws.setOnlineStatus(request)
 
 		}
 	}

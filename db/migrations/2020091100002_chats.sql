@@ -26,6 +26,7 @@ create table chat_subscribes
   chat_id    uuid not null,
   account_id uuid not null,
   role       varchar not null,
+  active     smallint check(active in (0, 1)) not null,
   created_at timestamp default CURRENT_TIMESTAMP not null,
   updated_at timestamp default CURRENT_TIMESTAMP not null,
   deleted_at timestamp null
@@ -51,7 +52,6 @@ create table chat_messages
   message           text,
   file_id           varchar,
   params 			json,
-  read              smallint check(read in (0, 1)) not null,
   created_at        timestamp  default CURRENT_TIMESTAMP not null,
   updated_at        timestamp  default CURRENT_TIMESTAMP not null,
   deleted_at        timestamp null
@@ -59,10 +59,24 @@ create table chat_messages
 create index idx_chat_msg_chat on chat_messages(chat_id);
 create index idx_chat_msg_client_message on chat_messages (client_message_id);
 
+create table chat_message_statuses
+(
+  id            uuid primary key,
+  message_id    uuid not null,
+  subscribe_id  uuid not null,
+  status        varchar check (status in ('recd', 'read')) default 'recd' not null,
+  created_at    timestamp default CURRENT_TIMESTAMP          not null,
+  updated_at    timestamp default CURRENT_TIMESTAMP          not null,
+  deleted_at    timestamp                                    null
+);
+
+create index idx_chat_mes_statuses_message_id on chat_message_statuses(message_id);
+create index idx_chat_mes_statuses_subscribe_id on chat_message_statuses(subscribe_id);
+
 -- +goose Down
 -- SQL section 'Down' is executed when this migration is rolled back
-drop table chat_messages;
 drop table chat_message_statuses;
+drop table chat_messages;
 drop table chat_message_types;
 drop table chat_subscribes;
 drop table chats;

@@ -2,9 +2,9 @@ package server
 
 import (
 	"chats/application"
+	"chats/converter"
 	"chats/infrastructure"
 	"chats/models"
-	"chats/sdk"
 	"chats/sentry"
 	"context"
 	"encoding/json"
@@ -76,14 +76,15 @@ func (ws *WsServer) Shutdown(ctx context.Context) {
 
 	time.Sleep(ws.shutdownSleep)
 
-	err := ws.hub.app.DB.Instance.Close()
-	if err != nil {
-		log.Println("db connection has been closed with sentry")
-	} else {
-		log.Println("db connection has been closed")
-	}
+	// TODO: in v2 there is no Close method
+	//err := ws.hub.app.DB.Instance.Close()
+	//if err != nil {
+	//	log.Println("db connection has been closed with sentry")
+	//} else {
+	//	log.Println("db connection has been closed")
+	//}
 
-	err = ws.hub.app.DB.Redis.Instance.Close()
+	err := ws.hub.app.DB.Redis.Instance.Close()
 	if err != nil {
 		log.Println("redis connection has been closed with sentry")
 	} else {
@@ -193,9 +194,14 @@ func (ws *WsServer) Consumer() {
 						room := ws.hub.CreateRoomIfNotExists(messageData.Message.Data.ChatId)
 						room.AddClient(client.uniqId)
 						client.rooms[messageData.Message.Data.ChatId] = room
+
+						log.Println("account " + messageData.Message.Data.Account.AccountId.String() + " added to room")
+
 					} else if room, ok := ws.hub.rooms[messageData.Message.Data.ChatId]; ok {
 						subscribers := ws.hub.app.DB.ChatSubscribes(messageData.Message.Data.ChatId)
 						room.UpdateSubscribers(subscribers)
+						log.Println("room " + messageData.Message.Data.ChatId.String() + " updated subscribers")
+
 					}
 				}
 				break
@@ -272,9 +278,10 @@ func IndexAction(h *Hub, w http.ResponseWriter, r *http.Request) {
 	}
 
 	//	account
-	accountModel := &sdk.AccountModel{}
-	sdkErr := h.app.Sdk.UserByToken(token, accountModel)
-	if sdkErr != nil || accountModel.Id == uuid.Nil {
+	//accountModel := &sdk.AccountModel{}
+	//sdkErr := h.app.Sdk.UserByToken(token, accountModel)
+	account, sentryErr := h.app.DB.GetAccount(uuid.FromStringOrNil(token), "")
+	if sentryErr != nil || account.Id == uuid.Nil {
 		response := &models.WSChatErrorResponse{
 			Error: models.WSChatErrorErrorResponse{
 				Message: WsUserIdentification,
@@ -306,7 +313,7 @@ func IndexAction(h *Hub, w http.ResponseWriter, r *http.Request) {
 
 	//	rooms & subscribes
 	rooms := make(map[uuid.UUID]*Room)
-	subscribes := h.app.DB.AccountSubscribes(accountModel.Id)
+	subscribes := h.app.DB.AccountSubscribes(account.Id)
 	for chatId, _ := range subscribes {
 		room := h.CreateRoomIfNotExists(chatId)
 		room.AddClient(uniqId.String())
@@ -319,7 +326,7 @@ func IndexAction(h *Hub, w http.ResponseWriter, r *http.Request) {
 		conn:       conn,
 		sendChan:   make(chan []byte, 256),
 		uniqId:     uniqId.String(),
-		account:    accountModel,
+		account:    converter.ConvertAccountFromModel(account),
 		rooms:      rooms,
 		subscribes: subscribes,
 	}

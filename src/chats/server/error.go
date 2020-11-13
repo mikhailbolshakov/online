@@ -21,4 +21,11 @@ const (
 	WsSendMessageErrorCode         = 108
 	WsConnReadMessageError         = ">>> FATAL: Ошибка чтения сообщения"
 	WsConnReadMessageErrorCode     = 109
+
+	WsCreateAccountInvalidTypeErrorMessage = "Неверный тип аккаунта"
+	WsCreateAccountInvalidTypeErrorCode = 201
+	WsCreateAccountEmptyAccountErrorMessage = "Пустое значение наименование аккаунта"
+	WsCreateAccountEmptyAccountErrorCode = 202
+
+
 )

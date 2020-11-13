@@ -1,6 +1,7 @@
 package server
 
 import (
+	"chats/converter"
 	"chats/database"
 	"chats/infrastructure"
 	"chats/models"
@@ -16,6 +17,16 @@ const (
 	ChatStatusClosed = "closed"
 )
 
+const (
+	SubscribeActive   = 1
+	SubscribeDeactive = 0
+
+	UserTypeClient   = "client"
+	UserTypeDoctor   = "doctor"
+	UserTypeOperator = "operator"
+	UserTypeBot      = "bot"
+)
+
 /**
 Список чатов пользователя
 */
@@ -26,14 +37,14 @@ func (ws *WsServer) getChatChats(params []byte) ([]byte, *sentry.SystemError) {
 		return nil, infrastructure.UnmarshalRequestError1201(err, params)
 	}
 
-	responseData, err := ws.hub.app.DB.GetAccountChats(data.Body.AccountId, data.Body.Count, ws.hub.app.Sdk)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlUserChatListError,
-			Code:    database.MysqlUserChatListErrorCode,
-			Data:    params,
-		}
+	account, sentryErr := ws.hub.app.DB.GetAccount(data.Body.Account.AccountId, data.Body.Account.ExternalId)
+	if sentryErr != nil {
+		return nil, sentryErr
+	}
+
+	responseData, sentryErr := ws.hub.app.DB.GetAccountChats(account.Id, data.Body.Count)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	result, err := json.Marshal(sdk.ChatListResponse{Data: responseData})
@@ -52,14 +63,9 @@ func (ws *WsServer) getChatById(params []byte) ([]byte, *sentry.SystemError) {
 		return nil, infrastructure.UnmarshalRequestError1201(err, params)
 	}
 
-	responseData, err := ws.hub.app.DB.GetChatById(data.Body.ChatId, data.Body.AccountId, ws.hub.app.Sdk)
+	responseData, sentryErr := ws.hub.app.DB.GetChatById(data.Body.ChatId, data.Body.AccountId)
 	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlChatInfoError,
-			Code:    database.MysqlChatInfoErrorCode,
-			Data:    params,
-		}
+		return nil, sentryErr
 	}
 
 	result, err := json.Marshal(sdk.ChatInfoResponse{Data: *responseData})
@@ -70,7 +76,7 @@ func (ws *WsServer) getChatById(params []byte) ([]byte, *sentry.SystemError) {
 	return result, nil
 }
 
-func (ws *WsServer) ChatByOrder(params []byte) ([]byte, *sentry.SystemError) {
+func (ws *WsServer) ChatByReference(params []byte) ([]byte, *sentry.SystemError) {
 	data := &sdk.RefereneChatRequest{}
 	err := json.Unmarshal(params, data)
 	if err != nil {
@@ -81,15 +87,10 @@ func (ws *WsServer) ChatByOrder(params []byte) ([]byte, *sentry.SystemError) {
 		return nil, infrastructure.UnmarshalRequestError1201(err, params)
 	}
 
-	responseData, err := ws.hub.app.DB.GetChatsByReference(data.Body, ws.hub.app.Sdk)
+	responseData, sentryErr := ws.hub.app.DB.GetChatsByReference(data.Body)
 
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlChatInfoError,
-			Code:    database.MysqlChatInfoErrorCode,
-			Data:    params,
-		}
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	result, err := json.Marshal(sdk.ChatListResponse{Data: responseData})
@@ -107,7 +108,7 @@ func (ws *WsServer) getChatsInfo(params []byte) ([]byte, *sentry.SystemError) {
 		return nil, infrastructure.UnmarshalRequestError1201(err, params)
 	}
 
-	if data.Body.AccountId == uuid.Nil {
+	if data.Body.Account.AccountId == uuid.Nil && data.Body.Account.ExternalId == "" {
 		return nil, &sentry.SystemError{
 			Error:   err,
 			Message: sdk.GetError(1403),
@@ -123,14 +124,14 @@ func (ws *WsServer) getChatsInfo(params []byte) ([]byte, *sentry.SystemError) {
 		}
 	}
 
-	responseData, err := ws.hub.app.DB.GetChatsById(data.Body.ChatsId, data.Body.AccountId, ws.hub.app.Sdk)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlChatInfoError,
-			Code:    database.MysqlChatInfoErrorCode,
-			Data:    params,
-		}
+	account, sentryErr := ws.hub.app.DB.GetAccount(data.Body.Account.AccountId, data.Body.Account.ExternalId)
+	if sentryErr != nil {
+		return nil, sentryErr
+	}
+
+	responseData, sentryErr := ws.hub.app.DB.GetChatsById(data.Body.ChatsId, account.Id)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	result, err := json.Marshal(sdk.ChatsInfoResponse{Data: responseData})
@@ -145,7 +146,7 @@ func (ws *WsServer) getLastChat(params []byte) ([]byte, *sentry.SystemError) {
 	data := &sdk.ChatsLastRequest{}
 	err := json.Unmarshal(params, data)
 
-	responseData, _ := ws.hub.app.DB.GetAccountChats(data.Body.AccountId, 1, ws.hub.app.Sdk)
+	responseData, _ := ws.hub.app.DB.GetAccountChats(data.Body.AccountId, 1)
 
 	if err != nil {
 		return nil, &sentry.SystemError{
@@ -217,7 +218,7 @@ func (ws *WsServer) getChatHistory(params []byte) ([]byte, *sentry.SystemError) 
 		}
 	}
 
-	ChatUsersResponse := []sdk.AccountModel{}
+	ChatAccountsResponse := []sdk.Account{}
 	if len(ChatMessagesResponse) == 0 {
 		ChatMessagesResponse = []sdk.ChatMessagesResponseDataItem{}
 	}
@@ -228,30 +229,19 @@ func (ws *WsServer) getChatHistory(params []byte) ([]byte, *sentry.SystemError) 
 		chatIds = append(chatIds, item.ChatId)
 	}
 
-	opponents, err := ws.hub.app.DB.GetChatOpponents(chatIds, ws.hub.app.Sdk)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: err.Error(),
-			Code:    database.MysqlErrorCode,
-			Data:    params,
-		}
+	opponents, sentryErr := ws.hub.app.DB.GetChatOpponents(chatIds, ws.hub.app.Sdk)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	for _, item := range opponents {
-		ChatUsersResponse = append(ChatUsersResponse, sdk.AccountModel{
-			Id:         item.Id,
-			FirstName:  item.FirstName,
-			LastName:   item.LastName,
-			MiddleName: item.MiddleName,
-			Photo:      item.Photo,
-		})
+		ChatAccountsResponse = append(ChatAccountsResponse, *converter.ConvertAccoutnFromExpandedAccountModel(&item))
 	}
 
 	result, err := json.Marshal(sdk.ChatMessagesHistoryResponse{
 		Data: sdk.ChatMessagesRecentResponseData{
 			Messages: ChatMessagesResponse,
-			Accounts: ChatUsersResponse,
+			Accounts: ChatAccountsResponse,
 		},
 	})
 	if err != nil {
@@ -298,45 +288,29 @@ func (ws *WsServer) getChatRecent(params []byte) ([]byte, *sentry.SystemError) {
 		Date:        data.Body.Date,
 	}
 
-	ChatMessagesResponse, err := ws.hub.app.DB.GetMessagesRecent(rp)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: err.Error(),
-			Code:    database.MysqlErrorCode,
-			Data:    params,
-		}
+	ChatMessagesResponse, sentryErr := ws.hub.app.DB.GetMessagesRecent(rp)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
-	ChatUsersResponse := []sdk.AccountModel{}
+	ChatAccountsResponse := []sdk.Account{}
 	if len(ChatMessagesResponse) == 0 {
 		ChatMessagesResponse = []sdk.ChatMessagesResponseDataItem{}
 	}
 
-	opponents, err := ws.hub.app.DB.GetChatOpponents(append([]uuid.UUID{}, rp.ChatId), ws.hub.app.Sdk)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: err.Error(),
-			Code:    database.MysqlErrorCode,
-			Data:    params,
-		}
+	opponents, sentryErr := ws.hub.app.DB.GetChatOpponents(append([]uuid.UUID{}, rp.ChatId), ws.hub.app.Sdk)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	for _, item := range opponents {
-		ChatUsersResponse = append(ChatUsersResponse, sdk.AccountModel{
-			Id:         item.Id,
-			FirstName:  item.FirstName,
-			LastName:   item.LastName,
-			MiddleName: item.MiddleName,
-			Photo:      item.Photo,
-		})
+		ChatAccountsResponse = append(ChatAccountsResponse, *converter.ConvertAccoutnFromExpandedAccountModel(&item))
 	}
 
 	result, err := json.Marshal(sdk.ChatMessagesRecentResponse{
 		Data: sdk.ChatMessagesRecentResponseData{
 			Messages: ChatMessagesResponse,
-			Accounts: ChatUsersResponse,
+			Accounts: ChatAccountsResponse,
 		},
 	})
 	if err != nil {
@@ -363,14 +337,9 @@ func (ws *WsServer) setChatNew(params []byte) ([]byte, *sentry.SystemError) {
 		Status:      ChatStatusOpened,
 	}
 
-	chatId, err := ws.hub.app.DB.ChatCreate(chatModel)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlChatCreateError,
-			Code:    database.MysqlChatCreateErrorCode,
-			Data:    params,
-		}
+	chatId, sentryErr := ws.hub.app.DB.ChatCreate(chatModel)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	response := sdk.ChatNewResponseData{ChatId: chatId}
@@ -394,32 +363,32 @@ func (ws *WsServer) setChatNewSubscribe(params []byte) ([]byte, *sentry.SystemEr
 		return nil, infrastructure.UnmarshalRequestError1201(err, params)
 	}
 
+	id, _ := uuid.NewV4()
 	chatModel := &models.Chat{
+		Id:          id,
 		ReferenceId: data.Body.ReferenceId,
 		Status:      ChatStatusOpened,
 	}
 
-	chatId, err := ws.hub.app.DB.ChatCreate(chatModel)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlChatCreateError,
-			Code:    database.MysqlChatCreateErrorCode,
-			Data:    params,
-		}
+	chatId, sentryErr := ws.hub.app.DB.ChatCreate(chatModel)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
-	account, err := ws.hub.app.DB.GetAccount(data.Body.Account.AccountId, data.Body.Account.ExternalId)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlChatCreateError,
-			Code:    database.MysqlChatCreateErrorCode,
-			Data:    params,
-		}
+	account, sentryErr := ws.hub.app.DB.GetAccount(data.Body.Account.AccountId, data.Body.Account.ExternalId)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
-	_, err = ws.hub.app.DB.SubscribeAccount(chatModel, account.Id)
+	id, _ = uuid.NewV4()
+	subscribeModel := &models.ChatSubscribe{
+		Id:        id,
+		ChatId:    chatId,
+		Active:    SubscribeActive,
+		AccountId: account.Id,
+		Role:      data.Body.Role,
+	}
+	_, err = ws.hub.app.DB.SubscribeAccount(subscribeModel)
 	if err != nil {
 		return nil, &sentry.SystemError{
 			Error:   err,
@@ -463,14 +432,9 @@ func (ws *WsServer) setChatAccountSubscribe(params []byte) ([]byte, *sentry.Syst
 		return nil, infrastructure.UnmarshalRequestError1201(err, params)
 	}
 
-	account, err := ws.hub.app.DB.GetAccount(data.Body.Account.AccountId, data.Body.Account.ExternalId)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlChatCreateError,
-			Code:    database.MysqlChatCreateErrorCode,
-			Data:    params,
-		}
+	account, sentryErr := ws.hub.app.DB.GetAccount(data.Body.Account.AccountId, data.Body.Account.ExternalId)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	chat := ws.hub.app.DB.Chat(data.Body.ChatId)
@@ -483,7 +447,15 @@ func (ws *WsServer) setChatAccountSubscribe(params []byte) ([]byte, *sentry.Syst
 		}
 	}
 
-	_, err = ws.hub.app.DB.SubscribeAccount(chat, account.Id)
+	id, _ := uuid.NewV4()
+	subscribeModel := &models.ChatSubscribe{
+		Id:        id,
+		ChatId:    data.Body.ChatId,
+		Active:    SubscribeActive,
+		AccountId: account.Id,
+		Role:      data.Body.Role,
+	}
+	_, err = ws.hub.app.DB.SubscribeAccount(subscribeModel)
 	if err != nil {
 		return nil, &sentry.SystemError{
 			Error:   err,
@@ -516,7 +488,7 @@ func (ws *WsServer) setChatAccountSubscribe(params []byte) ([]byte, *sentry.Syst
 	return result, nil
 }
 
-func (ws *WsServer) setChatUserUnsubscribe(params []byte) ([]byte, *sentry.SystemError) {
+func (ws *WsServer) setChatAccountUnsubscribe(params []byte) ([]byte, *sentry.SystemError) {
 	data := &sdk.ChatUserUnsubscribeRequest{}
 	err := json.Unmarshal(params, data)
 	if err != nil {
@@ -582,12 +554,21 @@ func (ws *WsServer) setChatMessage(params []byte) ([]byte, *sentry.SystemError) 
 	var accountId uuid.UUID
 	var role string
 	var opponentsId []uuid.UUID
+
+	paramsJson, err := json.Marshal(data.Body.Params)
+	if err != nil {
+		return nil, &sentry.SystemError{Error: err}
+	}
+
+	id, _ := uuid.NewV4()
 	messageModel := &models.ChatMessage{
+		Id:              id,
 		ClientMessageId: data.Body.ClientMessageId,
 		ChatId:          data.Body.ChatId,
 		Type:            data.Body.Type,
 		Message:         data.Body.Message,
 		FileId:          data.Body.FileId,
+		Params:          string(paramsJson),
 	}
 
 	subscribes := ws.hub.app.DB.ChatSubscribes(data.Body.ChatId)
@@ -602,18 +583,13 @@ func (ws *WsServer) setChatMessage(params []byte) ([]byte, *sentry.SystemError) 
 	}
 
 	if accountId != uuid.Nil {
-		err = ws.hub.app.DB.NewMessageTransact(messageModel, data.Body.Params, opponentsId)
-		if err != nil {
-			return nil, &sentry.SystemError{
-				Error:   err,
-				Message: database.MysqlChatCreateMessageError,
-				Code:    database.MysqlChatCreateMessageErrorCode,
-				Data:    params,
-			}
+		sentryErr := ws.hub.app.DB.NewMessageTransact(messageModel, opponentsId)
+		if sentryErr != nil {
+			return nil, sentryErr
 		}
 
 		messages := []interface{}{}
-		clients := []sdk.AccountModel{}
+		clients := []sdk.Account{}
 		messageParams, paramsErr := ws.hub.app.DB.GetParamsMap(messageModel.Id)
 		if paramsErr != nil {
 			return nil, &sentry.SystemError{
@@ -669,20 +645,12 @@ func (ws *WsServer) setChatMessage(params []byte) ([]byte, *sentry.SystemError) 
 			messages = append(messages, tmpMessageResponse)
 		}
 
-		accountModel := &sdk.AccountModel{
-			Id: accountId,
-		}
-		consultation := ws.hub.app.DB.Chat(data.Body.ChatId)
-		err := ws.hub.app.Sdk.VagueUserById(accountModel, role, consultation.ReferenceId)
+		accountModel, err := ws.hub.app.DB.GetAccount(accountId, "")
 		if err != nil {
-			return nil, &sentry.SystemError{
-				Error:   err.Error,
-				Code:    err.Code,
-				Message: err.Message,
-				Data:    err.Data,
-			}
+			return nil, err
 		}
-		clients = append(clients, *accountModel)
+
+		clients = append(clients, *converter.ConvertAccountFromModel(accountModel))
 
 		responseData := &models.WSChatMessagesDataResponse{
 			Messages: messages,
@@ -699,13 +667,6 @@ func (ws *WsServer) setChatMessage(params []byte) ([]byte, *sentry.SystemError) 
 
 		ws.hub.SendMessageToRoom(roomMessage)
 
-		if data.Body.Type == database.MessageTypeOrderDetail {
-			_, exists := data.Body.Params["orderId"]
-
-			if exists {
-				ws.hub.app.DB.ChatDeactivateNotice(data.Body.ChatId)
-			}
-		}
 	} else {
 		return nil, &sentry.SystemError{
 			Error:   err,
@@ -732,14 +693,9 @@ func (ws *WsServer) setChatStatus(params []byte) ([]byte, *sentry.SystemError) {
 		return nil, infrastructure.UnmarshalRequestError1201(err, params)
 	}
 
-	err = ws.hub.app.DB.ChatChangeStatus(data.Body.ChatId, database.ChatStatusClosed)
-	if err != nil {
-		return nil, &sentry.SystemError{
-			Error:   err,
-			Message: database.MysqlChatChangeStatusError,
-			Code:    database.MysqlChatChangeStatusErrorCode,
-			Data:    params,
-		}
+	sentryErr := ws.hub.app.DB.ChatChangeStatus(data.Body.ChatId, database.ChatStatusClosed)
+	if sentryErr != nil {
+		return nil, sentryErr
 	}
 
 	delete(ws.hub.rooms, data.Body.ChatId)
@@ -836,7 +792,7 @@ func (ws *WsServer) clientConsultationUpdate(params []byte) ([]byte, *sentry.Sys
 	return result, nil
 }
 
-func (ws *WsServer) changeChatUserSubscribe(params []byte) ([]byte, *sentry.SystemError) {
+func (ws *WsServer) changeChatAccountSubscribe(params []byte) ([]byte, *sentry.SystemError) {
 	data := &sdk.ChatAccountSubscribeChangeRequest{}
 	err := json.Unmarshal(params, data)
 	if err != nil {

@@ -47,14 +47,6 @@
   version = "v1.0.0"
 
 [[projects]]
-  digest = "1:ffe5ba52b122a56df4f9854ea2918e0d9f86e74919db63dc138f8fee3253d3d6"
-  name = "github.com/google/uuid"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "0e4e31197428a347842d152773b4cace4645ca25"
-  version = "v1.1.2"
-
-[[projects]]
   digest = "1:43dd08a10854b2056e615d1b1d22ac94559d822e1f8b6fcc92c1a1057e85188e"
   name = "github.com/gorilla/websocket"
   packages = ["."]
@@ -63,12 +55,9 @@
   version = "v1.2.0"
 
 [[projects]]
-  digest = "1:6895fbe5a10c5aebd1965cac6f6905dcdb21bee01e08912d3ba6a805c2485f6a"
+  digest = "1:235ae01f32fb5f12c5f6d2e0e05ab48e651ab31c126e45a4efc4f510810941ac"
   name = "github.com/jinzhu/gorm"
-  packages = [
-    ".",
-    "dialects/postgres",
-  ]
+  packages = ["."]
   pruneopts = "UT"
   revision = "6ed508ec6a4ecb3531899a69cbc746ccf65a4166"
   version = "v1.9.1"
@@ -82,6 +71,14 @@
   revision = "04140366298a54a039076d798123ffa108fff46c"
 
 [[projects]]
+  digest = "1:3458e5dd5934a9c852e11a4ea54a07de091fdad4c36d0ac033bb90bc16b0a046"
+  name = "github.com/jinzhu/now"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "7e7333ac029d4aad7e88500a30889fcd22489425"
+  version = "v1.1.1"
+
+[[projects]]
   digest = "1:70e697d67ccaec45e16bac3a32380ebcd9e7e071079c60d0171d42cf1cf9748a"
   name = "github.com/joho/godotenv"
   packages = ["."]
@@ -90,11 +87,10 @@
   version = "v1.2.0"
 
 [[projects]]
-  digest = "1:a40b57e466a0caf149e1c354c6ff820ff9cff2ebe4e10b4270100a4ad0d7e928"
+  digest = "1:d27eedd7296593e6ea74aed67aa0d04d97305c860209b0d4996a8aa2eac7fd0b"
   name = "github.com/lib/pq"
   packages = [
     ".",
-    "hstore",
     "oid",
     "scram",
   ]
@@ -157,21 +153,46 @@
   pruneopts = "UT"
   revision = "36e9d2ebbde5e3f13ab2e25625fd453271d6522e"
 
+[[projects]]
+  digest = "1:cf0eeff871fb146d0a77cfb6eecc38e79f7458fe6d05726ee59654d9799711ca"
+  name = "gorm.io/driver/postgres"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "2591a12c4fdf62e81734996d0361db21fe90ae45"
+  version = "v0.2.4"
+
+[[projects]]
+  digest = "1:815b11e6c119bac84d67acf673783ab25ffd57a843ee6374554d559eea6b71bc"
+  name = "gorm.io/gorm"
+  packages = [
+    ".",
+    "callbacks",
+    "clause",
+    "logger",
+    "migrator",
+    "schema",
+    "utils",
+  ]
+  pruneopts = "UT"
+  revision = "85e9f66d2652a4a4c422f22c3e7bf24fd7a2c33c"
+  version = "v1.20.6"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
     "github.com/getsentry/raven-go",
     "github.com/go-redis/redis",
-    "github.com/google/uuid",
     "github.com/gorilla/websocket",
     "github.com/jinzhu/gorm",
-    "github.com/jinzhu/gorm/dialects/postgres",
     "github.com/joho/godotenv",
     "github.com/mkevac/gopinba",
     "github.com/nats-io/go-nats",
     "github.com/pkg/errors",
     "github.com/satori/go.uuid",
+    "gorm.io/driver/postgres",
+    "gorm.io/gorm",
+    "gorm.io/gorm/logger",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

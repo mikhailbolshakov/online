@@ -16,6 +16,7 @@ type WSChatResponse struct {
 	Type string      `json:"type"`
 	Data interface{} `json:"data"`
 }
+
 type WSChatPushResponse struct {
 	WSChatResponse
 	Recipient string `json:"recipient"`
@@ -51,8 +52,8 @@ type WSChatMessageDataRequest struct {
 
 //	message response
 type WSChatMessagesDataResponse struct {
-	Messages []interface{}      `json:"messages"`
-	Accounts []sdk.AccountModel `json:"accounts"`
+	Messages []interface{} `json:"messages"`
+	Accounts []sdk.Account `json:"accounts"`
 }
 type WSChatMessagesDataMessageResponse struct {
 	Id              uuid.UUID         `json:"id"`
@@ -77,9 +78,9 @@ type WSChatMessageStatusRequest struct {
 	Data WSChatMessageStatusDataRequest `json:"data"`
 }
 type WSChatMessageStatusDataRequest struct {
-	Status    string `json:"status"`
-	ChatId    uuid.UUID   `json:"chatId"`
-	MessageId uuid.UUID   `json:"messageId"`
+	Status    string    `json:"status"`
+	ChatId    uuid.UUID `json:"chatId"`
+	MessageId uuid.UUID `json:"messageId"`
 }
 
 //	messageStatus response
@@ -88,9 +89,9 @@ type WSChatMessageStatusResponse struct {
 	Data WSChatMessageStatusDataResponse `json:"data"`
 }
 type WSChatMessageStatusDataResponse struct {
-	Status    string `json:"status"`
-	ChatId    uuid.UUID   `json:"chatId"`
-	MessageId uuid.UUID   `json:"messageId"`
+	Status    string    `json:"status"`
+	ChatId    uuid.UUID `json:"chatId"`
+	MessageId uuid.UUID `json:"messageId"`
 }
 
 //	opponentStatus request
@@ -108,8 +109,8 @@ type WSChatOpponentStatusResponse struct {
 	Data WSChatOpponentStatusDataResponse `json:"data"`
 }
 type WSChatOpponentStatusDataResponse struct {
-	ChatId   uuid.UUID         `json:"chatId"`
-	Accounts []UserStatusModel `json:"accounts"`
+	ChatId   uuid.UUID            `json:"chatId"`
+	Accounts []AccountStatusModel `json:"accounts"`
 }
 
 //	join request without response
@@ -128,8 +129,8 @@ type WSChatTypingRequest struct {
 	Data WSChatTypingDataRequest `json:"data"`
 }
 type WSChatTypingDataRequest struct {
-	ChatId uuid.UUID   `json:"chatId"`
-	Status string `json:"status"`
+	ChatId uuid.UUID `json:"chatId"`
+	Status string    `json:"status"`
 }
 
 //	typing request
@@ -162,9 +163,9 @@ type WSMessageToMobileClientDataResponse struct {
 
 //	system user
 type WSSystemUserRequest struct {
-	SendPush  bool `json:"send_push"`
+	SendPush  bool      `json:"send_push"`
 	AccountId uuid.UUID `json:"account_id"`
-	RoomId    uint `json:"room_id"`
+	RoomId    uint      `json:"room_id"`
 }
 
 //	system subscribe user
@@ -197,12 +198,12 @@ type WSSystemUserUnsubscribeRequestMessage struct {
 
 //	other models
 
-type ExpandedUserModel struct {
-	sdk.AccountModel
+type ExpandedAccountModel struct {
+	sdk.Account
 	Role string `json:"role"`
 }
 
-type UserStatusModel struct {
+type AccountStatusModel struct {
 	AccountId uuid.UUID `json:"userId"`
 	Status    string    `json:"status"`
 }

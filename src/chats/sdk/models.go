@@ -39,11 +39,11 @@ type ApiUserDataResponse struct {
 	User ApiAccountDataAccountResponse `json:"user"`
 }
 type ApiAccountDataAccountResponse struct {
-	Id         uuid.UUID   `json:"id"`
-	FirstName  string `json:"first_name"`
-	MiddleName string `json:"middle_name"`
-	LastName   string `json:"last_name"`
-	Photo      string `json:"photo"`
+	Id         uuid.UUID `json:"id"`
+	FirstName  string    `json:"first_name"`
+	MiddleName string    `json:"middle_name"`
+	LastName   string    `json:"last_name"`
+	Photo      string    `json:"photo"`
 }
 
 //	personal
@@ -63,8 +63,8 @@ type ApiDoctorSpecializationRespones struct {
 	Data ApiDoctorSpecializationResponesData `json:"data"`
 }
 type ApiDoctorSpecializationResponesData struct {
-	Id    uuid.UUID   `json:"id"`
-	Title string `json:"title"`
+	Id    uuid.UUID `json:"id"`
+	Title string    `json:"title"`
 }
 
 //	push
@@ -89,7 +89,7 @@ type ApiUserPushResponse struct {
 
 type RecipientWithOrder struct {
 	AccountId      uuid.UUID `json:"user_id"`
-	ConsultationId string      `json:"consultation_id"`
+	ConsultationId string    `json:"consultation_id"`
 }
 
 type ApiUserPushRequest struct {
@@ -104,9 +104,9 @@ type ApiUserPushRequestMessage struct {
 
 //	storage
 type ApiFileRequest struct {
-	FileId    string `json:"file_id"`
-	ChatId    uuid.UUID   `json:"chat_id"`
-	AccountId uuid.UUID   `json:"account_id"`
+	FileId    string    `json:"file_id"`
+	ChatId    uuid.UUID `json:"chat_id"`
+	AccountId uuid.UUID `json:"account_id"`
 }
 type ApiFileResponse struct {
 	Data FileModel `json:"data"`
@@ -138,7 +138,7 @@ type ChatNewSubscribeRequest struct {
 type ChatNewSubscribeRequestBody struct {
 	ReferenceId string          `json:"reference_id"`
 	Account     *AccountRequest `json:"account"`
-	UserType    string          `json:"user_type"`
+	Role        string          `json:"role"`
 }
 
 type ChatNewResponse struct {
@@ -156,6 +156,7 @@ type ChatAccountSubscribeRequest struct {
 type ChatAccountSubscribeRequestBody struct {
 	Account *AccountRequest `json:"account"`
 	ChatId  uuid.UUID       `json:"chat_id"`
+	Role    string          `json:"role"`
 }
 
 type ChatAccountSubscribeResponse struct {
@@ -245,8 +246,8 @@ type ChatListRequest struct {
 	Body ChatListRequestBody `json:"body"`
 }
 type ChatListRequestBody struct {
-	AccountId uuid.UUID `json:"account_id"`
-	Count     uint16    `json:"count"`
+	Account   AccountRequest `json:"account"`
+	Count     int    `json:"count"`
 }
 
 type ChatListResponse struct {
@@ -296,7 +297,7 @@ type RefereneChatRequest struct {
 	Body []ReferenceChatRequestBodyItem `json:"body"`
 }
 type ReferenceChatRequestBodyItem struct {
-	ReferenceId uuid.UUID `json:"reference_id"`
+	ReferenceId string    `json:"reference_id"`
 	OpponentId  uuid.UUID `json:"opponent_id"`
 }
 
@@ -310,8 +311,8 @@ type ChatsInfoRequest struct {
 	Body ChatsInfoRequestBody `json:"body"`
 }
 type ChatsInfoRequestBody struct {
-	AccountId uuid.UUID   `json:"account_id"`
-	ChatsId   []uuid.UUID `json:"chats_id"`
+	Account AccountRequest `json:"account"`
+	ChatsId []uuid.UUID    `json:"chats_id"`
 }
 
 type ChatsInfoResponse struct {
@@ -327,10 +328,10 @@ type ChatMessagesRequestBody struct {
 	ChatId      uuid.UUID `json:"chat_id"`      // Обязательное поле
 	MessageId   uuid.UUID `json:"message_id"`   // id последнего сообщения (не обязательное)
 	NewMessages bool      `json:"new_messages"` // true - получить сообщения от MessageId, false - до MessageId
-	Role        string    `json:"role"`    // роль юзера
+	Role        string    `json:"role"`         // роль юзера
 	Search      string    `json:"search"`
 	Date        string    `json:"date"`
-	Count       uint16    `json:"count"` // количество сообщений (не обязательное)
+	Count       int64    `json:"count"` // количество сообщений (не обязательное)
 	Admin       bool      `json:"admin"`
 	OnlyOneChat bool      `json:"only_one_chat"`
 }
@@ -376,7 +377,7 @@ type ChatMessagesRecentResponse struct {
 }
 type ChatMessagesRecentResponseData struct {
 	Messages []ChatMessagesResponseDataItem `json:"messages"`
-	Accounts []AccountModel                 `json:"accounts"`
+	Accounts []Account                      `json:"accounts"`
 }
 
 //	Список истории сообщений для клиента [GET] /chats/chat/hictory (по сути тож самое что и /chats/chat/recent)
@@ -419,15 +420,6 @@ type ClientConsultationUpdateRequestBodyData struct {
 	ConsultationId uint `json:"consultationId"`
 }
 
-//	other models
-type AccountModel struct {
-	Id         uuid.UUID   `json:"id"`
-	FirstName  string `json:"firstName"`
-	LastName   string `json:"lastName"`
-	MiddleName string `json:"middleName"`
-	Photo      string `json:"photo"`
-}
-
 type UserTokenModel struct {
 	AccessToken string `json:"access_token"`
 }
@@ -461,31 +453,5 @@ type ConsultationResponseResponse struct {
 }
 type ConsultationResponseResponseData struct {
 	PatientId uuid.UUID `json:"patient_id"`
-	AccountId uuid.UUID `json:"account_id"`
-}
-
-type AccountRequest struct {
-	AccountId  uuid.UUID   `json:"account_id"`
-	ExternalId string `json:"external_id"`
-}
-
-type CreateAccountRequest struct {
-	ApiRequestModel
-	Body CreateAccountRequestBody `json:"body"`
-}
-
-type CreateAccountRequestBody struct {
-	Account    string `json:"account"`
-	Type       string `json:"type"`
-	ExternalId string `json:"externalId"`
-	FirstName  string `json:"firstName"`
-	MiddleName string `json:"middleName"`
-	LastName   string `json:"lastName"`
-	Email      string `json:"email"`
-	Phone      string `json:"phone"`
-	AvatarUrl  string `json:"avatarUrl"`
-}
-
-type CreateAccountResponse struct {
 	AccountId uuid.UUID `json:"account_id"`
 }

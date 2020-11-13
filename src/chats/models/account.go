@@ -2,7 +2,6 @@ package models
 
 import (
 	"github.com/satori/go.uuid"
-	"time"
 )
 
 type Account struct {
@@ -24,7 +23,5 @@ type OnlineStatus struct {
 	Id        uuid.UUID
 	AccountId uuid.UUID `gorm:"column:account_id"`
 	Status    string    `gorm:"column:status"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt *time.Time `sql:"index"`
+	BaseModel
 }

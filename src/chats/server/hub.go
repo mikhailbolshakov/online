@@ -84,7 +84,7 @@ func (h *Hub) onClientDisconnect(client *Client) {
 	}
 }
 
-func (h *Hub) userHasClients(user *sdk.AccountModel) bool {
+func (h *Hub) userHasClients(user *sdk.Account) bool {
 	for _, otherClient := range h.clients {
 		if otherClient.account.Id == user.Id {
 			return true
@@ -136,6 +136,10 @@ func (h *Hub) sendMessageToClient(client *Client, message []byte) {
 }
 
 func (h *Hub) checkConnectionStatus(userId uuid.UUID, online bool) {
+
+	// TODO: send message to BUS
+
+	/*
 	if !online {
 		if _, ok := h.clientsId[userId]; !ok {
 			go h.app.Sdk.ChangeConnectionStatus(userId, online)
@@ -143,6 +147,7 @@ func (h *Hub) checkConnectionStatus(userId uuid.UUID, online bool) {
 	} else {
 		go h.app.Sdk.ChangeConnectionStatus(userId, online)
 	}
+	 */
 }
 
 func (h *Hub) clientConnectionChange(c *Client) {
@@ -188,7 +193,7 @@ func (h *Hub) clientConnectionChange(c *Client) {
 		opponentId := h.app.DB.LastOpponentId(c.account.Id)
 
 		if opponentId != uuid.Nil {
-			data := new(models.UserStatusModel)
+			data := new(models.AccountStatusModel)
 			data.AccountId = c.account.Id
 
 			roomMessage := &RoomMessage{
@@ -204,7 +209,7 @@ func (h *Hub) clientConnectionChange(c *Client) {
 
 		/*for chatId, item := range c.subscribes {
 			if item.Role == database.UserTypeClient {
-				data := new(models.UserStatusModel)
+				data := new(models.AccountStatusModel)
 				data.AccountId = c.account.Id
 
 				roomMessage := &RoomMessage{

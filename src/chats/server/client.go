@@ -29,7 +29,7 @@ type Client struct {
 	rooms           map[uuid.UUID]*Room
 	subscribes      map[uuid.UUID]database.SubscribeAccountModel
 	subscribesMutex sync.Mutex
-	account         *sdk.AccountModel
+	account         *sdk.Account
 }
 
 func (c *Client) send(message []byte) {
@@ -114,11 +114,12 @@ func (c *Client) Read() {
 			})
 			log.Println(">>>>>> ReadMessageError:", err) //	TODO
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("> > > Read sentry: %v", err) //	TODO
+				log.Printf("> > > Read sentry: %v", err) 	 //	TODO
 			}
 			break
 		}
 
+		log.Println("message from client: ", string(message))
 		go c.hub.onClientMessage(message, c)
 	}
 }

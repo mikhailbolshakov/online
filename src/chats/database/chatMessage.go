@@ -3,6 +3,7 @@ package database
 import (
 	"chats/models"
 	"chats/sdk"
+	"chats/sentry"
 	uuid "github.com/satori/go.uuid"
 	"strings"
 	"time"
@@ -12,14 +13,6 @@ const (
 	MessageTypeMessage       = "message"
 	MessageTypeSystem        = "system"
 	MessageTypeDocument      = "document"
-	MessageTypeDoctorDetail  = "doctor_detail"
-	MessageTypeClinicDetail  = "clinic_detail"
-	MessageTypePayDetail     = "pay_detail"
-	MessageTypeProductDetail = "product_detail"
-	MessageTypeMedcardDetail = "medcard_detail"
-	MessageTypeOrderDetail   = "order_detail"
-	MessageTypeProductLink   = "product_link"
-	MessageTypePromocodeLink = "promocode_link"
 	MessageTypeNotice        = "notice"
 
 	CountMessagesDefault = 50
@@ -32,14 +25,6 @@ func ValidateType(messageType string) bool {
 		MessageTypeMessage,
 		MessageTypeSystem,
 		MessageTypeDocument,
-		MessageTypeDoctorDetail,
-		MessageTypeClinicDetail,
-		MessageTypePayDetail,
-		MessageTypeProductDetail,
-		MessageTypeMedcardDetail,
-		MessageTypeOrderDetail,
-		MessageTypeProductLink,
-		MessageTypePromocodeLink,
 		MessageTypeNotice,
 	}
 
@@ -52,8 +37,7 @@ func ValidateType(messageType string) bool {
 	return false
 }
 
-func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, params map[string]string, opponentsId []uuid.UUID) error {
-	db.Instance.Exec("set transaction isolation level serializable") //	TODO
+func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, opponentsId []uuid.UUID) *sentry.SystemError {
 
 	if len(messageModel.ClientMessageId) > 0 {
 		checkMessage := &models.ChatMessage{}
@@ -71,17 +55,14 @@ func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, params m
 	tx := db.Instance.Begin()
 	err := tx.Create(messageModel).Error
 	if err != nil {
-		return err
-	}
-
-	err = db.SetParams(messageModel.Id, params)
-	if err != nil {
-		tx.Rollback()
-		return err
+		return &sentry.SystemError{Error: err}
 	}
 
 	for _, opponentId := range opponentsId {
+
+		id, _ := uuid.NewV4()
 		status := &models.ChatMessageStatus{
+			Id:          id,
 			MessageId:   messageModel.Id,
 			SubscribeId: opponentId,
 		}
@@ -95,13 +76,13 @@ func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, params m
 
 	err = tx.Commit().Error
 	if err != nil {
-		return err
+		return &sentry.SystemError{Error: err}
 	}
 
 	return nil
 }
 
-func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.ChatMessagesResponseDataItem, error) {
+func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.ChatMessagesResponseDataItem, *sentry.SystemError) {
 	subscribe := &models.ChatSubscribe{}
 	if params.Admin {
 		db.Instance.
@@ -110,23 +91,22 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 	} else {
 		err := db.Check(params.ChatId, params.AccountId)
 		if err != nil {
-			return nil, err
+			return nil, &sentry.SystemError{Error: err}
 		}
 	}
 
-	status := db.Instance.
+	statusSQ := db.Instance.
 		Select("cms.status as status").
 		Table("chat_message_statuses cms").
 		Where("cms.message_id = cm.id").
 		Where("cms.status = ?", MessageStatusRead).
-		Limit(1).
-		SubQuery()
+		Limit(1)
 
-	chats := db.Instance.
+	chatsSQ := db.Instance.
 		Select("chats2.id").
 		Table("chats chats").
 		Joins("left join chats chats2 on chats2.order_id = chats.order_id").
-		Where("chats.id = ?", params.ChatId).SubQuery()
+		Where("chats.id = ?", params.ChatId)
 
 	fields := "cm.id, " +
 		"cm.client_message_id, " +
@@ -140,10 +120,10 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 		"cs.user_id"
 
 	query := db.Instance.
-		Select(fields, status, MessageStatusRecd).
+		Select(fields, statusSQ, MessageStatusRecd).
 		Table("chat_messages cm").
 		Joins("left join chat_subscribes cs on cs.id = cm.subscribe_id").
-		Where("cm.chat_id in ?", chats).
+		Where("cm.chat_id in ?", chatsSQ).
 		Where("cm.deleted_at IS null").
 		Where("cm.id > ?", params.MessageId).
 		Order("cm.id asc")
@@ -151,7 +131,7 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 	rows, err := query.Rows()
 	defer rows.Close()
 	if err != nil {
-		return nil, err
+		return nil, &sentry.SystemError{Error: err}
 	}
 
 	var messages []sdk.ChatMessagesResponseDataItem
@@ -169,7 +149,7 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 
 	mp, err := db.GetParams(messageIds)
 	if err != nil {
-		return nil, err
+		return nil, &sentry.SystemError{Error: err}
 	}
 
 	if len(mp) > 0 {
@@ -210,18 +190,17 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 	loadPrevMessages := false
 
 	if params.OnlyOneChat == false && params.MessageId == uuid.Nil && params.Search == "" && params.Date == "" {
-		firstMessageChats := db.Instance.
+		firstMessageChatsSQ := db.Instance.
 			Select("chats2.id").
 			Table("chats chats").
-			Joins("left join chats chats2 on chats2.order_id = chats.order_id").
-			Where("chats.id = ?", params.ChatId).
-			SubQuery()
+			Joins("left join chats chats2 on chats2.reference_id = chats.reference_id").
+			Where("chats.id = ?", params.ChatId)
 
 		firstMessage := &models.FirstMessage{}
 		db.Instance.
 			Select("cm.id").
 			Table("chat_messages cm").
-			Where("cm.chat_id in ?", firstMessageChats).
+			Where("cm.chat_id in ?", firstMessageChatsSQ).
 			Order("cm.id asc").
 			Limit(1).
 			Find(firstMessage)
@@ -234,7 +213,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 	chatsQuery := db.Instance.
 		Select("chats2.id").
 		Table("chats chats").
-		Joins("left join chats chats2 on chats2.order_id = chats.order_id")
+		Joins("left join chats chats2 on chats2.reference_id = chats.reference_id")
 
 	searchChats := db.Instance.
 		Select("cs.chat_id").
@@ -242,30 +221,28 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 
 	if params.UserType == "operator" {
 		//пациент из запрашиваемого чата
-		client := db.Instance.
-			Select("ocs.user_id").
+		clientSQ := db.Instance.
+			Select("ocs.account_id").
 			Table("chat_subscribes ocs").
 			Where("ocs.chat_id = ?", params.ChatId).
-			Where("ocs.user_type = 'client'").
-			SubQuery()
+			Where("ocs.role = 'client'")
 
 		//все чаты пациента
-		userChats := db.Instance.
+		accountChatsSQ := db.Instance.
 			Select("ucs.chat_id").
 			Table("chat_subscribes ucs").
-			Where("ucs.user_id in ?", client).
-			SubQuery()
+			Where("ucs.user_id in ?", clientSQ)
 
 		//все чаты мк и пациента
 		searchChats = searchChats.
-			Where("cs.user_id = ?", params.AccountId).
-			Where("cs.chat_id in ?", userChats)
+			Where("cs.account_id = ?", params.AccountId).
+			Where("cs.chat_id in ?", accountChatsSQ)
 
 		chatsQuery = searchChats
 	} else if params.UserType == "patient" {
 		//все чаты пациента
 		searchChats = searchChats.Where("cs.user_id = ?", params.AccountId)
-		chatsQuery = chatsQuery.Where("chats.id in ?", searchChats.SubQuery())
+		chatsQuery = chatsQuery.Where("chats.id in ?", searchChats)
 	} else {
 		chatsQuery = chatsQuery.Where("chats.id = ?", params.ChatId)
 	}
@@ -275,8 +252,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 		Table("chat_message_statuses cms").
 		Where("cms.message_id = cm.id").
 		Where("cms.status = ?", MessageStatusRead).
-		Limit(1).
-		SubQuery()
+		Limit(1)
 
 	fields := "cm.id, " +
 		"cm.client_message_id, " +
@@ -303,7 +279,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 			Select(fields, status, MessageStatusRecd).
 			Table("chat_messages cm").
 			Joins("left join chat_subscribes cs on cs.id = cm.subscribe_id").
-			Where("cm.chat_id in ?", chatsQuery.SubQuery()).
+			Where("cm.chat_id in ?", chatsQuery).
 			Where("cm.deleted_at IS null").
 			Where("cm.id "+ordering+" ?", params.MessageId).
 			Order("cm.id desc")
@@ -317,7 +293,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 				Select(fields, status, MessageStatusRecd).
 				Table("chat_messages cm").
 				Joins("left join chat_subscribes cs on cs.id = cm.subscribe_id").
-				Where("cm.chat_id in ?", chatsQuery.SubQuery()).
+				Where("cm.chat_id in ?", chatsQuery).
 				Where("cm.deleted_at IS null").
 				Where("cm.id "+orderingPrev+" ?", params.MessageId).
 				Order("cm.id desc").
@@ -328,27 +304,27 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 			Select(fields, status, MessageStatusRecd).
 			Table("chat_messages cm").
 			Joins("left join chat_subscribes cs on cs.id = cm.subscribe_id").
-			Where("cm.chat_id in ?", chatsQuery.SubQuery()).
+			Where("cm.chat_id in ?", chatsQuery).
 			Where("cm.deleted_at IS null")
 	}
 
 	if params.NewMessages != false {
-		var totalCount uint16
-		var offset uint16
+		var totalCount int64
+		var offset int
 		totalCount = 0
 		offset = 0
 
 		query.Count(&totalCount)
 
 		if totalCount > params.Count {
-			offset = totalCount - params.Count
+			offset = int(totalCount - params.Count)
 		}
 
 		query = query.Offset(offset)
 	}
 
-	query = query.Limit(params.Count)
-	
+	query = query.Limit(int(params.Count))
+
 	if params.Search != "" {
 		params.Search = strings.Replace(params.Search, ",", "", -1)
 		searchMessages := strings.Split(params.Search, " ")

@@ -45,6 +45,7 @@ func (log *Logs) Scan() {
 }
 
 func SetError(err *sentry.SystemError) {
+	log.Printf("Error: %s %d", err.Message, err.Code)
 	sentry.SetError(err)
 }
 
