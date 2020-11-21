@@ -20,7 +20,7 @@ func (ws *WsServer) Grpc() {
 	var opts []grpc.ServerOption
 	grpcServer := grpc.NewServer(opts...)
 
-	registration(grpcServer)
+	registration(ws, grpcServer)
 
 	log.Println("Listening GRPC....")
 	err = grpcServer.Serve(lis)
@@ -32,7 +32,7 @@ func (ws *WsServer) Grpc() {
 
 }
 
-func registration(s *grpc.Server) {
-	pb.RegisterRoomServer(s, &RoomGrpcService{})
-	pb.RegisterAccountServer(s, &AccountGrpcService{})
+func registration(ws *WsServer, s *grpc.Server) {
+	pb.RegisterRoomServer(s, &RoomGrpcService{ws: ws})
+	pb.RegisterAccountServer(s, &AccountGrpcService{ws: ws})
 }

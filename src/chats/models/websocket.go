@@ -5,6 +5,9 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
+
+// TODO: remove relations to sdk
+
 //	request default
 type WSChatRequest struct {
 	Type string      `json:"type"`

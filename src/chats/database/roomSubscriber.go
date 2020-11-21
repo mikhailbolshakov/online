@@ -132,16 +132,6 @@ func (db *Storage) GetChatOpponents(chatIds []uuid.UUID, sdkConn *sdk.Sdk) (map[
 	return result, nil
 }
 
-func (db *Storage) GetAccountRole(chatId, accountId uuid.UUID) string {
-	subscribe := &models.RoomSubscriber{}
-	db.Instance.
-		Where("chat_id = ?", chatId).
-		Where("user_id = ?", accountId).
-		First(subscribe)
-
-	return subscribe.Role
-}
-
 func (db *Storage) RecdUsers(createdAt time.Time) []models.RoomSubscriber {
 	subscribers := []models.RoomSubscriber{}
 

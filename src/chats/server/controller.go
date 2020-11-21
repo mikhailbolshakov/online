@@ -89,17 +89,6 @@ func (ws *WsServer) Router(request []byte) ([]byte, *system.Error) {
 		case "/chats/message":
 			return ws.setChatMessage(request)
 
-		case "/ws/client/message":
-			return ws.sendClientMessage(request)
-
-		}
-
-	case http.MethodPut:
-		switch clientRequest.Path {
-
-		case "/chats/account/subscribe":
-			return ws.changeChatAccountSubscribe(request)
-
 		}
 	}
 

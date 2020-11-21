@@ -15,10 +15,8 @@ import (
 	"time"
 )
 
-var Server *WsServer
-
 func NewServer(app *application.Application) *WsServer {
-	Server = &WsServer{
+	return &WsServer{
 		apiTopic:       system.BusTopic(),
 		port:           os.Getenv("WEBSOCKET_PORT"),
 		hub:            NewHub(app),
@@ -26,7 +24,6 @@ func NewServer(app *application.Application) *WsServer {
 		shutdownSleep:  getShutdownSleep(),
 		actualAccounts: make(map[uuid.UUID]time.Time),
 	}
-	return Server
 }
 
 func getShutdownSleep() time.Duration {
@@ -77,6 +74,9 @@ func (ws *WsServer) Run() {
 }
 
 func (ws *WsServer) Shutdown(ctx context.Context) {
+
+	// TODO: close grpc
+
 	if system.Cron() {
 		ws.hub.app.Sdk.Shutdown()
 		log.Println("nats connection has been closed")

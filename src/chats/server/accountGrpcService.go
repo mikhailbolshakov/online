@@ -8,6 +8,7 @@ import (
 )
 
 type AccountGrpcService struct {
+	ws *WsServer
 	proto.UnimplementedAccountServer
 }
 
@@ -22,7 +23,7 @@ func (s *AccountGrpcService) Create(ctx context.Context, rq *proto.CreatAccountR
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.createAccount(modelRq)
+	modelRs, err := s.ws.createAccount(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{proto.Err(err)}
 		return errorRs, nil
@@ -49,7 +50,7 @@ func (s *AccountGrpcService) Update(ctx context.Context, rq *proto.UpdateAccount
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.updateAccount(modelRq)
+	modelRs, err := s.ws.updateAccount(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{proto.Err(err)}
 		return errorRs, nil
@@ -80,7 +81,7 @@ func (s *AccountGrpcService) GetByCriteria(ctx context.Context, rq *proto.GetAcc
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.getAccountsByCriteria(modelRq)
+	modelRs, err := s.ws.getAccountsByCriteria(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{proto.Err(err)}
 		return errorRs, nil
@@ -105,7 +106,7 @@ func (s *AccountGrpcService) SetOnlineStatus(ctx context.Context, rq *proto.SetO
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.setOnlineStatus(modelRq)
+	modelRs, err := s.ws.setOnlineStatus(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{proto.Err(err)}
 		return errorRs, nil
@@ -130,7 +131,7 @@ func (s *AccountGrpcService) GetOnlineStatus(ctx context.Context, rq *proto.GetO
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.getOnlineStatus(modelRq)
+	modelRs, err := s.ws.getOnlineStatus(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{proto.Err(err)}
 		return errorRs, nil

@@ -6,6 +6,7 @@ import (
 )
 
 type RoomGrpcService struct {
+	ws *WsServer
 	proto.UnimplementedRoomServer
 }
 
@@ -19,7 +20,7 @@ func (s *RoomGrpcService) Create(ctx context.Context, rq *proto.CreateRoomReques
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.CreateRoom(modelRq)
+	modelRs, err := s.ws.CreateRoom(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{ proto.Err(err) }
 		return errorRs, nil
@@ -45,7 +46,7 @@ func (s *RoomGrpcService) Subscribe(ctx context.Context, rq *proto.RoomSubscribe
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.RoomSubscribe(modelRq)
+	modelRs, err := s.ws.RoomSubscribe(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{ proto.Err(err) }
 		return errorRs, nil
@@ -70,7 +71,7 @@ func (s *RoomGrpcService) GetByCriteria(ctx context.Context, rq *proto.GetRoomsB
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.GetRoomsByCriteria(modelRq)
+	modelRs, err := s.ws.GetRoomsByCriteria(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{ proto.Err(err) }
 		return errorRs, nil
@@ -95,7 +96,7 @@ func (s *RoomGrpcService) CloseRoom(ctx context.Context, rq *proto.CloseRoomRequ
 		return errorRs, nil
 	}
 
-	modelRs, err := Server.CloseRoom(modelRq)
+	modelRs, err := s.ws.CloseRoom(modelRq)
 	if err != nil {
 		errorRs.Errors = []*proto.Error{ proto.Err(err) }
 		return errorRs, nil
