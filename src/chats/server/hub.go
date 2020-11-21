@@ -2,11 +2,10 @@ package server
 
 import (
 	"chats/application"
+	"chats/system"
 	"chats/models"
-	"chats/sentry"
-	"chats/infrastructure"
-	"encoding/json"
 	"chats/sdk"
+	"encoding/json"
 	uuid "github.com/satori/go.uuid"
 	"log"
 	"sync"
@@ -14,49 +13,50 @@ import (
 )
 
 type Hub struct {
-	clients        map[string]*Client
-	clientsId      map[uuid.UUID]*Client
-	accounts       map[uuid.UUID]bool
-	rooms          map[uuid.UUID]*Room
-	roomMutex      sync.Mutex
-	registerChan   chan *Client
-	unregisterChan chan *Client
-	messageChan    chan *RoomMessage
-	router         *Router
-	app            *application.Application
+	sessions        map[string]*Session
+	accountSessions map[uuid.UUID]*Session
+	accounts        map[uuid.UUID]bool
+	rooms           map[uuid.UUID]*Room
+	roomMutex       sync.Mutex
+	registerChan    chan *Session
+	unregisterChan  chan *Session
+	messageChan     chan *RoomMessage
+	router          *Router
+	app             *application.Application
 }
 
 func NewHub(app *application.Application) *Hub {
 
 	return &Hub{
-		clients:        make(map[string]*Client),
-		clientsId:      make(map[uuid.UUID]*Client),
-		accounts:       make(map[uuid.UUID]bool),
-		rooms:          make(map[uuid.UUID]*Room),
-		registerChan:   make(chan *Client),
-		unregisterChan: make(chan *Client),
-		messageChan:    make(chan *RoomMessage),
-		router:         SetRouter(),
-		app:            app,
+		// WebSocket connections (key - session Id)
+		sessions:        make(map[string]*Session),
+		accountSessions: make(map[uuid.UUID]*Session),
+		accounts:        make(map[uuid.UUID]bool),
+		rooms:           make(map[uuid.UUID]*Room),
+		registerChan:    make(chan *Session),
+		unregisterChan:  make(chan *Session),
+		messageChan:     make(chan *RoomMessage),
+		router:          SetRouter(),
+		app:             app,
 	}
 }
 
 func (h *Hub) Run() {
 	for {
 		select {
-		case client := <-h.registerChan:
-			h.clients[client.uniqId] = client
-			h.clientsId[client.account.Id] = client
-			h.accounts[client.account.Id] = true
-			log.Println(">>> client register:", client.account.Id) //	TODO
-			h.checkConnectionStatus(client.account.Id, true)
-		case client := <-h.unregisterChan:
-			go h.clientConnectionChange(client)
-			h.onClientDisconnect(client)
-			log.Println(">>> client unregister:", client.account.Id) //	TODO
-			h.checkConnectionStatus(client.account.Id, false)
+		case session := <-h.registerChan:
+			h.sessions[session.sessionId] = session
+			h.accountSessions[session.account.Id] = session
+			h.accounts[session.account.Id] = true
+			log.Println(">>> session register:", session.account.Id) //	TODO
+			h.checkConnectionStatus(session.account.Id, true)
+		case session := <-h.unregisterChan:
+			go h.clientConnectionChange(session)
+			h.onSessionDisconnect(session)
+			log.Println(">>> session unregister:", session.account.Id) //	TODO
+			h.checkConnectionStatus(session.account.Id, false)
 		case message := <-h.messageChan:
-			log.Println(">>> message to client:", message.Message) //	TODO
+			log.Println(">>> message to session:", message.Message) //	TODO
 
 			{ //	Scaling
 				answer, err := json.Marshal(message)
@@ -64,29 +64,29 @@ func (h *Hub) Run() {
 					log.Println("Не удалось сформировать ответ клиенту")
 					log.Println(err)
 				} else {
-					go h.app.Sdk.Subject(infrastructure.InsideTopic()).Publish(answer) //	return sentry
+					go h.app.Sdk.Subject(system.InsideTopic()).Publish(answer) //	return sentry
 				}
 			}
 		}
 	}
 }
 
-func (h *Hub) onClientDisconnect(client *Client) {
-	if _, ok := h.clients[client.uniqId]; ok {
-		delete(h.clients, client.uniqId)
-		h.removeClientFromRooms(client)
-		close(client.sendChan)
+func (h *Hub) onSessionDisconnect(session *Session) {
+	if _, ok := h.sessions[session.sessionId]; ok {
+		delete(h.sessions, session.sessionId)
+		h.removeSessionFromRooms(session)
+		close(session.sendChan)
 
-		if !h.userHasClients(client.account) {
-			delete(h.accounts, client.account.Id)
-			delete(h.clientsId, client.account.Id)
+		if !h.accountHasSessions(session.account) {
+			delete(h.accounts, session.account.Id)
+			delete(h.accountSessions, session.account.Id)
 		}
 	}
 }
 
-func (h *Hub) userHasClients(user *sdk.Account) bool {
-	for _, otherClient := range h.clients {
-		if otherClient.account.Id == user.Id {
+func (h *Hub) accountHasSessions(account *sdk.Account) bool {
+	for _, s := range h.sessions {
+		if s.account.Id == account.Id {
 			return true
 		}
 	}
@@ -94,36 +94,37 @@ func (h *Hub) userHasClients(user *sdk.Account) bool {
 	return false
 }
 
-func (h *Hub) removeClientFromRooms(client *Client) {
-	for _, room := range client.rooms {
-		room.removeClient(client)
+func (h *Hub) removeSessionFromRooms(session *Session) {
+	for _, room := range session.rooms {
+		room.removeSession(session)
 	}
 }
 
-func (h *Hub) removeAllClients() {
-	for _, client := range h.clients {
-		h.onClientDisconnect(client)
+func (h *Hub) removeAllSessions() {
+	for _, session := range h.sessions {
+		h.onSessionDisconnect(session)
 	}
 }
 
-func (h *Hub) CreateRoomIfNotExists(chatId uuid.UUID) *Room {
+func (h *Hub) LoadRoomIfNotExists(roomId uuid.UUID) *Room {
+
+	subscribers := h.app.DB.GetRoomAccountSubscribers(roomId)
+
 	h.roomMutex.Lock()
 	defer h.roomMutex.Unlock()
 
-	subscribers := h.app.DB.ChatSubscribes(chatId)
-	if _, ok := h.rooms[chatId]; !ok {
-		room := CreateRoom(chatId, subscribers)
-		h.rooms[chatId] = room
-
+	if _, ok := h.rooms[roomId]; !ok {
+		room := InitRoom(roomId, subscribers)
+		h.rooms[roomId] = room
 		return room
 	} else {
-		h.rooms[chatId].subscribers = subscribers
+		h.rooms[roomId].subscribers = subscribers
 	}
 
-	return h.rooms[chatId]
+	return h.rooms[roomId]
 }
 
-func (h *Hub) onClientMessage(message []byte, client *Client) {
+func (h *Hub) onMessage(message []byte, client *Session) {
 	h.router.Dispatch(h, client, message)
 }
 
@@ -131,8 +132,8 @@ func (h *Hub) SendMessageToRoom(message *RoomMessage) {
 	h.messageChan <- message
 }
 
-func (h *Hub) sendMessageToClient(client *Client, message []byte) {
-	client.send(message)
+func (h *Hub) sendMessage(session *Session, message []byte) {
+	session.send(message)
 }
 
 func (h *Hub) checkConnectionStatus(userId uuid.UUID, online bool) {
@@ -141,7 +142,7 @@ func (h *Hub) checkConnectionStatus(userId uuid.UUID, online bool) {
 
 	/*
 	if !online {
-		if _, ok := h.clientsId[userId]; !ok {
+		if _, ok := h.accountSessions[userId]; !ok {
 			go h.app.Sdk.ChangeConnectionStatus(userId, online)
 		}
 	} else {
@@ -150,32 +151,32 @@ func (h *Hub) checkConnectionStatus(userId uuid.UUID, online bool) {
 	 */
 }
 
-func (h *Hub) clientConnectionChange(c *Client) {
+func (h *Hub) clientConnectionChange(session *Session) {
 	time.Sleep(10 * time.Second)
 
 	//	todo вынести в отдельный метод
 	cronGetUserStatusRequestMessage := &models.CronGetUserStatusRequest{
 		Type: MessageTypeGetUserStatus,
 		Data: models.CronGetAccountStatusRequestData{
-			AccountId: c.account.Id,
+			AccountId: session.account.Id,
 		},
 	}
 
 	request, err := json.Marshal(cronGetUserStatusRequestMessage)
 	if err != nil {
-		infrastructure.SetError(infrastructure.MarshalError1011(err, nil))
+		system.ErrHandler.SetError(system.MarshalError1011(err, nil))
 		return
 	}
 
 	response, cronRequestError := h.app.Sdk.
-		Subject(infrastructure.CronTopic()).
+		Subject(system.CronTopic()).
 		Request(request)
 
 	if cronRequestError != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   cronRequestError.Error,
-			Message: infrastructure.CronResponseError,
-			Code:    infrastructure.CronResponseErrorCode,
+			Message: system.CronResponseError,
+			Code:    system.CronResponseErrorCode,
 			Data:    append(request, response...),
 		})
 		return
@@ -184,17 +185,17 @@ func (h *Hub) clientConnectionChange(c *Client) {
 	cronGetUserResponse := &models.CronGetAccountStatusResponse{}
 	err = json.Unmarshal(response, cronGetUserResponse)
 	if err != nil {
-		infrastructure.SetError(infrastructure.MarshalError1011(err, response))
+		system.ErrHandler.SetError(system.MarshalError1011(err, response))
 		return
 	}
 
 	if !cronGetUserResponse.Online {
-		//if _, ok := h.clientsId[c.account.Id]; !ok {	//	plan B
-		opponentId := h.app.DB.LastOpponentId(c.account.Id)
+		//if _, ok := h.accountSessions[session.account.Id]; !ok {	//	plan B
+		opponentId := h.app.DB.LastOpponentId(session.account.Id)
 
 		if opponentId != uuid.Nil {
 			data := new(models.AccountStatusModel)
-			data.AccountId = c.account.Id
+			data.AccountId = session.account.Id
 
 			roomMessage := &RoomMessage{
 				AccountId: opponentId,
@@ -207,10 +208,10 @@ func (h *Hub) clientConnectionChange(c *Client) {
 			go h.SendMessageToRoom(roomMessage)
 		}
 
-		/*for chatId, item := range c.subscribes {
+		/*for chatId, item := range session.subscribes {
 			if item.Role == database.UserTypeClient {
 				data := new(models.AccountStatusModel)
-				data.AccountId = c.account.Id
+				data.AccountId = session.account.Id
 
 				roomMessage := &RoomMessage{
 					RoomId: chatId,

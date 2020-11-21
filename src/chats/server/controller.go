@@ -1,13 +1,10 @@
 package server
 
 import (
-	"chats/database"
-	"chats/sentry"
-	"chats/infrastructure"
 	"chats/sdk"
+	"chats/system"
 	"encoding/json"
 	"github.com/gorilla/websocket"
-	"github.com/mkevac/gopinba"
 	uuid "github.com/satori/go.uuid"
 	"net/http"
 	"strings"
@@ -21,7 +18,7 @@ type WsServer struct {
 	port                string
 	hub                 *Hub
 	server              *http.Server
-	logs                *infrastructure.Logs
+	logs                *system.Logs
 	actualAccounts      map[uuid.UUID]time.Time
 	actualAccountsMutex sync.Mutex
 }
@@ -42,7 +39,7 @@ func (ws *WsServer) ApiConsumer() {
 
 	for {
 		err := <-apiConsumerErrorChan
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err.Error,
 			Message: err.Message,
 			Code:    err.Code,
@@ -65,49 +62,17 @@ func (ws *WsServer) GetHandler(request []byte) ([]byte, *sdk.Error) {
 	}
 }
 
-func (ws *WsServer) Router(request []byte) ([]byte, *sentry.SystemError) {
+func (ws *WsServer) Router(request []byte) ([]byte, *system.Error) {
 
 	clientRequest := &sdk.ApiRequest{}
 	err := json.Unmarshal(request, &clientRequest)
 	if err != nil {
-		return nil, infrastructure.UnmarshalRequestError1201(err, request)
-	}
-
-	if ws.hub.app.DB.Pinba != nil {
-		tags := map[string]string{
-			"group":  "sdk",
-			"topic":  ws.apiTopic,
-			"method": clientRequest.Method,
-			"path":   clientRequest.Path,
-		}
-		timer := gopinba.TimerStart(tags)
-		defer func(timer *gopinba.Timer, db *database.Storage) {
-			timer.Stop()
-			db.Pinba.SendRequest(&gopinba.Request{
-				Tags:        timer.Tags,
-				RequestTime: timer.GetDuration(),
-			})
-		}(timer, ws.hub.app.DB)
+		return nil, system.UnmarshalRequestError1201(err, request)
 	}
 
 	switch strings.ToUpper(clientRequest.Method) {
 	case http.MethodGet:
 		switch clientRequest.Path {
-
-		case "/accounts/account":
-			return ws.getAccountById(request)
-
-		case "/chats/chats":
-			return ws.getChatChats(request)
-
-		case "/chats/chat":
-			return ws.getChatById(request)
-
-		case "/order/chats":
-			return ws.ChatByReference(request)
-
-		case "/chats/info":
-			return ws.getChatsInfo(request)
 
 		case "/chats/messages/update",
 			"/chats/chat/recent":
@@ -117,39 +82,16 @@ func (ws *WsServer) Router(request []byte) ([]byte, *sentry.SystemError) {
 			"/chats/chat/history":
 			return ws.getChatHistory(request)
 
-		case "/chats/last":
-			return ws.getLastChat(request)
-
 		}
 	case http.MethodPost:
 		switch clientRequest.Path {
 
-		case "/accounts/account":
-			return ws.createAccount(request)
-
-		case "/chats/new":
-			return ws.setChatNew(request)
-
-		case "/chats/new/subscribe":
-			return ws.setChatNewSubscribe(request)
-
-		case "/chats/account/subscribe":
-			return ws.setChatAccountSubscribe(request)
-
-		case "/chats/account/unsubscribe":
-			return ws.setChatAccountUnsubscribe(request)
-
 		case "/chats/message":
 			return ws.setChatMessage(request)
-
-		case "/chats/status":
-			return ws.setChatStatus(request)
 
 		case "/ws/client/message":
 			return ws.sendClientMessage(request)
 
-		case "/ws/client/consultation/update":
-			return ws.clientConsultationUpdate(request)
 		}
 
 	case http.MethodPut:
@@ -158,16 +100,10 @@ func (ws *WsServer) Router(request []byte) ([]byte, *sentry.SystemError) {
 		case "/chats/account/subscribe":
 			return ws.changeChatAccountSubscribe(request)
 
-		case "/account":
-			return ws.updateAccount(request)
-
-		case "/account/online-status":
-			return ws.setOnlineStatus(request)
-
 		}
 	}
 
-	return nil, &sentry.SystemError{
+	return nil, &system.Error{
 		Error:   nil,
 		Message: sdk.GetError(1203),
 		Code:    1203,

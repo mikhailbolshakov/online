@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+option go_package = "chats/proto";
+
+package proto;
+
+import "common.proto";
+
+message CreatAccountRequest {
+  string Account = 1;
+  string Type = 2;
+  string ExternalId = 3;
+  string FirstName = 4;
+  string MiddleName = 5;
+  string LastName = 6;
+  string Email = 7;
+  string Phone = 8;
+  string AvatarUrl = 9;
+}
+
+message AccountResponse {
+  UUID Id = 1;
+}
+
+message CreateAccountResponse {
+  AccountResponse Account = 1;
+  repeated Error Errors = 2;
+}
+
+message UpdateAccountRequest {
+  AccountIdRequest AccountId = 1;
+  string FirstName = 2;
+  string MiddleName = 3;
+  string LastName = 4;
+  string Email = 5;
+  string Phone = 6;
+  string AvatarUrl = 7;
+}
+
+message UpdateAccountResponse {
+  repeated Error Errors = 1;
+}
+
+message LockAccountRequest {
+  AccountIdRequest AccountId = 1;
+}
+
+message LockAccountResponse {
+  repeated Error Errors = 1;
+}
+
+message AccountItem {
+  UUID Id = 1;
+  string Account = 2;
+  string Type = 3;
+  string ExternalId = 4;
+  string FirstName = 5;
+  string MiddleName = 6;
+  string LastName = 7;
+  string Email = 8;
+  string Phone = 9;
+  string AvatarUrl = 10;
+}
+
+message GetAccountsByCriteriaRequest {
+  AccountIdRequest AccountId = 1;
+  string Email = 2;
+  string Phone = 3;
+}
+
+message GetAccountsByCriteriaResponse {
+  repeated AccountItem Accounts = 1;
+  repeated Error Errors = 2;
+}
+
+message SetOnlineStatusRequest {
+  string Status = 1;
+  AccountIdRequest AccountId = 2;
+}
+
+message SetOnlineStatusResponse {
+  repeated Error Errors = 2;
+}
+
+message GetOnlineStatusRequest {
+  AccountIdRequest AccountId = 1;
+}
+
+message GetOnlineStatusResponse {
+  string Status = 1;
+  repeated Error Errors = 2;
+}
+
+service Account {
+  rpc Create(CreatAccountRequest) returns (CreateAccountResponse) {}
+  rpc Update(UpdateAccountRequest) returns (UpdateAccountResponse) {}
+  rpc Lock(LockAccountRequest) returns (LockAccountResponse) {}
+  rpc GetByCriteria(GetAccountsByCriteriaRequest) returns (GetAccountsByCriteriaResponse) {}
+  rpc SetOnlineStatus(SetOnlineStatusRequest) returns (SetOnlineStatusResponse) {}
+  rpc GetOnlineStatus(GetOnlineStatusRequest) returns (GetOnlineStatusResponse) {}
+}
+

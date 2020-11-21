@@ -2,10 +2,8 @@ package server
 
 import (
 	"chats/application"
-	"chats/converter"
-	"chats/infrastructure"
 	"chats/models"
-	"chats/sentry"
+	"chats/system"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,16 +15,18 @@ import (
 	"time"
 )
 
+var Server *WsServer
 
 func NewServer(app *application.Application) *WsServer {
-	return &WsServer{
-		apiTopic:       infrastructure.BusTopic(),
+	Server = &WsServer{
+		apiTopic:       system.BusTopic(),
 		port:           os.Getenv("WEBSOCKET_PORT"),
 		hub:            NewHub(app),
-		logs:           infrastructure.Init(),
+		logs:           system.Init(),
 		shutdownSleep:  getShutdownSleep(),
 		actualAccounts: make(map[uuid.UUID]time.Time),
 	}
+	return Server
 }
 
 func getShutdownSleep() time.Duration {
@@ -35,14 +35,28 @@ func getShutdownSleep() time.Duration {
 }
 
 func (ws *WsServer) Run() {
-	if infrastructure.Cron() {
+	if system.Cron() {
+
+		// push для непрочитанных сообщений
 		go ws.userServiceMessageManager()
+
+		// переводит в offline
 		ws.consumer()
+
 	} else {
 
+		// gRPC connection listener
+		go ws.Grpc()
+
+		//
 		go ws.hub.Run()
+
+		// listens to NATS topics
 		go ws.ApiConsumer()
+
+		// listens internal topic
 		go ws.Consumer()
+
 		go ws.provider()
 
 		srv := &http.Server{Addr: ws.port}
@@ -63,12 +77,12 @@ func (ws *WsServer) Run() {
 }
 
 func (ws *WsServer) Shutdown(ctx context.Context) {
-	if infrastructure.Cron() {
+	if system.Cron() {
 		ws.hub.app.Sdk.Shutdown()
 		log.Println("nats connection has been closed")
 	} else {
-		ws.hub.removeAllClients()
-		log.Println("all clients has been removed")
+		ws.hub.removeAllSessions()
+		log.Println("all wsSessions has been removed")
 
 		ws.hub.app.Sdk.Shutdown()
 		log.Println("nats connection has been closed")
@@ -91,10 +105,10 @@ func (ws *WsServer) Shutdown(ctx context.Context) {
 		log.Println("redis connection has been closed")
 	}
 
-	sentry.Close()
+	system.ErrHandler.Close()
 	log.Println("sentry connection has been closed")
 
-	if !infrastructure.Cron() {
+	if !system.Cron() {
 		err = ws.server.Shutdown(ctx)
 		if err != nil {
 			log.Println("sentry connection has been shutdown with sentry")
@@ -106,7 +120,7 @@ func (ws *WsServer) Consumer() {
 	dataChan := make(chan []byte, 1024)
 
 	go ws.hub.app.Sdk.
-		Subject(infrastructure.InsideTopic()).
+		Subject(system.InsideTopic()).
 		Consumer(dataChan)
 
 	for {
@@ -115,10 +129,10 @@ func (ws *WsServer) Consumer() {
 		message := &RoomMessage{}
 		err := json.Unmarshal(data, message)
 		if err != nil {
-			infrastructure.SetError(&sentry.SystemError{
+			system.ErrHandler.SetError(&system.Error{
 				Error:   err,
-				Message: infrastructure.UnmarshallingError,
-				Code:    infrastructure.UnmarshallingErrorCode,
+				Message: system.UnmarshallingError,
+				Code:    system.UnmarshallingErrorCode,
 				Data:    data,
 			})
 		}
@@ -129,19 +143,19 @@ func (ws *WsServer) Consumer() {
 				fmt.Println("- Consumer room exists")
 				answer, err := json.Marshal(message.Message)
 				if err != nil {
-					infrastructure.SetError(&sentry.SystemError{
+					system.ErrHandler.SetError(&system.Error{
 						Error:   err,
 						Message: WsCreateClientResponse,
 						Code:    WsCreateClientResponseCode,
 						Data:    []byte("Type: " + message.Message.Type),
 					})
 				} else {
-					subscribers := room.getRoomClientIds()
-					fmt.Println("- Consumer subscribers cnt:", len(subscribers))
-					fmt.Println("- Chat subscribers cnt:", len(room.subscribers))
-					for _, uniqueId := range subscribers {
-						if client, ok := ws.hub.clients[uniqueId]; ok {
-							go ws.hub.sendMessageToClient(client, answer)
+					sessionIds := room.getRoomSessionIds()
+					fmt.Println("- Consumer sessionIds cnt:", len(sessionIds))
+					fmt.Println("- GetRoom sessionIds cnt:", len(room.subscribers))
+					for _, uniqueId := range sessionIds {
+						if session, ok := ws.hub.sessions[uniqueId]; ok {
+							go ws.hub.sendMessage(session, answer)
 						}
 					}
 				}
@@ -151,15 +165,15 @@ func (ws *WsServer) Consumer() {
 			fmt.Println("- Consumer message to client")
 			answer, err := json.Marshal(message.Message)
 			if err != nil {
-				infrastructure.SetError(&sentry.SystemError{
+				system.ErrHandler.SetError(&system.Error{
 					Error:   err,
 					Message: WsCreateClientResponse,
 					Code:    WsCreateClientResponseCode,
 					Data:    []byte("Type: " + message.Message.Type),
 				})
 			} else {
-				if client, ok := ws.hub.clientsId[message.AccountId]; ok {
-					go ws.hub.sendMessageToClient(client, answer)
+				if client, ok := ws.hub.accountSessions[message.AccountId]; ok {
+					go ws.hub.sendMessage(client, answer)
 					log.Println("NATS: Send WS Message") //	TODO
 				} else if message.SendPush {
 					/*pushMessage := &sdk.ApiUserPushResponse{
@@ -167,58 +181,58 @@ func (ws *WsServer) Consumer() {
 						Data: message.Message.Data,
 					}
 					go ws.hub.app.Sdk.UserPush(message.AccountId, pushMessage)
-					log.Println("NATS: Send Push Message")*/ //	TODO
+					log.Println("NATS: Send Push Message")*///	TODO
 				}
 			}
 		} else if message.RoomId == uuid.Nil && message.AccountId == uuid.Nil {
 			//	system message ws only
 			fmt.Println(" -----> system message ws only!", *message.Message)
 			switch message.Message.Type {
-			case infrastructure.SystemMsgTypeUserSubscribe:
+			case system.SystemMsgTypeUserSubscribe:
 				messageData := &models.WSSystemUserSubscribeRequest{}
 				err := json.Unmarshal(data, messageData)
 				if err != nil {
-					infrastructure.SetError(&sentry.SystemError{
+					system.ErrHandler.SetError(&system.Error{
 						Error:   err,
 						Message: WsCreateClientResponse,
 						Code:    WsCreateClientResponseCode,
 						Data:    []byte("Type: " + message.Message.Type),
 					})
 				} else {
-					if client, ok := ws.hub.clientsId[messageData.Message.Data.Account.AccountId]; ok {
-						//	update client
-						cliSubscribes := ws.hub.app.DB.AccountSubscribes(messageData.Message.Data.Account.AccountId)
-						ws.hub.clientsId[messageData.Message.Data.Account.AccountId].SetSubscribers(cliSubscribes)
+					if session, ok := ws.hub.accountSessions[messageData.Message.Data.AccountId]; ok {
+						//	update session
+						cliSubscribes := ws.hub.app.DB.GetAccountSubscribers(messageData.Message.Data.AccountId)
+						ws.hub.accountSessions[messageData.Message.Data.AccountId].SetSubscribers(cliSubscribes)
 
 						//	update room
-						room := ws.hub.CreateRoomIfNotExists(messageData.Message.Data.ChatId)
-						room.AddClient(client.uniqId)
-						client.rooms[messageData.Message.Data.ChatId] = room
+						room := ws.hub.LoadRoomIfNotExists(messageData.Message.Data.RoomId)
+						room.AddSession(session.sessionId)
+						session.rooms[messageData.Message.Data.RoomId] = room
 
-						log.Println("account " + messageData.Message.Data.Account.AccountId.String() + " added to room")
+						log.Println("account " + messageData.Message.Data.AccountId.String() + " added to room")
 
-					} else if room, ok := ws.hub.rooms[messageData.Message.Data.ChatId]; ok {
-						subscribers := ws.hub.app.DB.ChatSubscribes(messageData.Message.Data.ChatId)
+					} else if room, ok := ws.hub.rooms[messageData.Message.Data.RoomId]; ok {
+						subscribers := ws.hub.app.DB.GetRoomAccountSubscribers(messageData.Message.Data.RoomId)
 						room.UpdateSubscribers(subscribers)
-						log.Println("room " + messageData.Message.Data.ChatId.String() + " updated subscribers")
+						log.Println("room " + messageData.Message.Data.RoomId.String() + " updated subscribers")
 
 					}
 				}
 				break
-			case infrastructure.SystemMsgTypeUserUnsubscribe:
+			case system.SystemMsgTypeUserUnsubscribe:
 				messageData := &models.WSSystemUserUnsubscribeRequest{}
 				err := json.Unmarshal(data, messageData)
 				if err != nil {
-					infrastructure.SetError(&sentry.SystemError{
+					system.ErrHandler.SetError(&system.Error{
 						Error:   err,
 						Message: WsCreateClientResponse,
 						Code:    WsCreateClientResponseCode,
 						Data:    []byte("Type: " + message.Message.Type),
 					})
 				} else {
-					if cli, ok := ws.hub.clientsId[messageData.Message.Data.AccountId]; ok {
-						if room, ok := cli.rooms[messageData.Message.Data.ChatId]; ok {
-							room.removeClient(cli)
+					if cli, ok := ws.hub.accountSessions[messageData.Message.Data.AccountId]; ok {
+						if room, ok := cli.rooms[messageData.Message.Data.RoomId]; ok {
+							room.removeSession(cli)
 						}
 					}
 				}
@@ -232,7 +246,7 @@ func createResponse(response *models.WSChatErrorResponse) []byte {
 	result, err := json.Marshal(response)
 
 	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
 			Message: WsCreateClientResponse,
 			Code:    WsCreateClientResponseCode,
@@ -248,7 +262,7 @@ func IndexAction(h *Hub, w http.ResponseWriter, r *http.Request) {
 	//	upgrade websocket connection
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
 			Message: WsUpgradeProblem,
 			Code:    WsUpgradeProblemCode,
@@ -267,7 +281,7 @@ func IndexAction(h *Hub, w http.ResponseWriter, r *http.Request) {
 			},
 		}
 		w.Write(createResponse(response))
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   nil,
 			Message: WsEmptyToken,
 			Code:    WsEmptyTokenCode,
@@ -289,7 +303,7 @@ func IndexAction(h *Hub, w http.ResponseWriter, r *http.Request) {
 			},
 		}
 		w.Write(createResponse(response))
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   nil,
 			Message: WsUserIdentification,
 			Code:    WsUserIdentificationCode,
@@ -299,40 +313,21 @@ func IndexAction(h *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//	uniq
-	uniqId, err := uuid.NewV4()
-	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
-			Error:   err,
-			Message: WsUniqueIdGenerateProblem,
-			Code:    WsUniqueIdGenerateProblemCode,
-		})
-
-		return
-	}
+	session := InitSession(h, conn)
 
 	//	rooms & subscribes
 	rooms := make(map[uuid.UUID]*Room)
-	subscribes := h.app.DB.AccountSubscribes(account.Id)
-	for chatId, _ := range subscribes {
-		room := h.CreateRoomIfNotExists(chatId)
-		room.AddClient(uniqId.String())
-		rooms[chatId] = room
+	subscribes := h.app.DB.GetAccountSubscribers(account.Id)
+	for roomId, _ := range subscribes {
+		room := h.LoadRoomIfNotExists(roomId)
+		room.AddSession(session.sessionId)
+		rooms[roomId] = room
 	}
+	session.account = ConvertAccountFromModel(account)
+	session.rooms = rooms
+	session.subscribes = subscribes
 
-	//	client
-	client := &Client{
-		hub:        h,
-		conn:       conn,
-		sendChan:   make(chan []byte, 256),
-		uniqId:     uniqId.String(),
-		account:    converter.ConvertAccountFromModel(account),
-		rooms:      rooms,
-		subscribes: subscribes,
-	}
-
-	//	websocket power
-	client.hub.registerChan <- client
-	go client.Write()
-	go client.Read()
+	h.registerChan <- session
+	go session.Write()
+	go session.Read()
 }

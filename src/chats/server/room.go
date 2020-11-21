@@ -1,16 +1,15 @@
 package server
 
 import (
-	"chats/database"
 	"chats/models"
 	uuid "github.com/satori/go.uuid"
 	"sync"
 )
 
 type Room struct {
-	clients     map[string]bool
-	subscribers []database.SubscribeAccountModel
-	clientMutex sync.Mutex
+	wsSessions  map[string]bool
+	subscribers []models.AccountSubscriber
+	mutex       sync.Mutex
 	roomId      uuid.UUID
 }
 
@@ -21,45 +20,45 @@ type RoomMessage struct {
 	Message   *models.WSChatResponse
 }
 
-func CreateRoom(roomId uuid.UUID, subscribers []database.SubscribeAccountModel) *Room {
+func InitRoom(roomId uuid.UUID, subscribers []models.AccountSubscriber) *Room {
 	return &Room{
-		clients:     make(map[string]bool),
+		wsSessions:  make(map[string]bool),
 		subscribers: subscribers,
 		roomId:      roomId,
 	}
 }
 
-func (r *Room) removeClient(client *Client) {
-	r.clientMutex.Lock()
-	defer r.clientMutex.Unlock()
+func (r *Room) removeSession(session *Session) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 
-	if _, ok := r.clients[client.uniqId]; ok {
-		delete(r.clients, client.uniqId)
+	if _, ok := r.wsSessions[session.sessionId]; ok {
+		delete(r.wsSessions, session.sessionId)
 	}
 }
 
-func (r *Room) AddClient(clientUniqId string) {
-	r.clientMutex.Lock()
-	defer r.clientMutex.Unlock()
+func (r *Room) AddSession(sessionId string) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 
-	r.clients[clientUniqId] = true
+	r.wsSessions[sessionId] = true
 }
 
-func (r *Room) getRoomClientIds() []string {
-	r.clientMutex.Lock()
-	defer r.clientMutex.Unlock()
+func (r *Room) getRoomSessionIds() []string {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 
-	var uniqueIds []string
+	var sessionIds []string
 
-	for uniqueId, _ := range r.clients {
-		uniqueIds = append(uniqueIds, uniqueId)
+	for sessionId, _ := range r.wsSessions {
+		sessionIds = append(sessionIds, sessionId)
 	}
 
-	return uniqueIds
+	return sessionIds
 }
 
-func (r *Room) UpdateSubscribers(subscribers []database.SubscribeAccountModel) {
-	r.clientMutex.Lock()
-	defer r.clientMutex.Unlock()
+func (r *Room) UpdateSubscribers(subscribers []models.AccountSubscriber) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 	r.subscribers = subscribers
 }

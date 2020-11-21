@@ -44,7 +44,7 @@ type WSChatMessagesDataRequest struct {
 
 type WSChatMessageDataRequest struct {
 	ClientMessageId string            `json:"clientMessageId"`
-	ChatId          uuid.UUID         `json:"chatId"`
+	RoomId          uuid.UUID         `json:"roomId"`
 	Type            string            `json:"type"`
 	Text            string            `json:"text"`
 	Params          map[string]string `json:"params"`
@@ -100,7 +100,7 @@ type WSChatOpponentStatusRequest struct {
 	Data WSChatOpponentStatusDataRequest `json:"data"`
 }
 type WSChatOpponentStatusDataRequest struct {
-	ChatId uuid.UUID `json:"chatId"`
+	RoomId uuid.UUID `json:"roomId"`
 }
 
 //	opponentStatus response
@@ -109,7 +109,7 @@ type WSChatOpponentStatusResponse struct {
 	Data WSChatOpponentStatusDataResponse `json:"data"`
 }
 type WSChatOpponentStatusDataResponse struct {
-	ChatId   uuid.UUID            `json:"chatId"`
+	RoomId   uuid.UUID            `json:"roomId"`
 	Accounts []AccountStatusModel `json:"accounts"`
 }
 
@@ -129,7 +129,7 @@ type WSChatTypingRequest struct {
 	Data WSChatTypingDataRequest `json:"data"`
 }
 type WSChatTypingDataRequest struct {
-	ChatId uuid.UUID `json:"chatId"`
+	RoomId uuid.UUID `json:"roomId"`
 	Status string    `json:"status"`
 }
 
@@ -174,15 +174,8 @@ type WSSystemUserSubscribeRequest struct {
 	Message WSSystemUserSubscribeRequestMessage `json:"message"`
 }
 type WSSystemUserSubscribeRequestMessage struct {
-	Type string                              `json:"type"`
-	Data sdk.ChatAccountSubscribeRequestBody `json:"data"`
-}
-
-//	Deprecated: struct is deprecated
-type WSSystemUserSubscribeRequestMessageData struct {
-	AccountId uuid.UUID `json:"user_id"`
-	ChatId    uuid.UUID `json:"chat_id"`
-	Role      string    `json:"role"`
+	Type string                                 `json:"type"`
+	Data sdk.RoomMessageAccountSubscribeRequest `json:"data"`
 }
 
 //system unsubscribe user
@@ -193,7 +186,7 @@ type WSSystemUserUnsubscribeRequest struct {
 
 type WSSystemUserUnsubscribeRequestMessage struct {
 	Type string                                `json:"type"`
-	Data sdk.ChatAccountUnsubscribeRequestBody `json:"data"`
+	Data sdk.RoomMessageAccountUnsubscribeRequest `json:"data"`
 }
 
 //	other models
@@ -204,7 +197,7 @@ type ExpandedAccountModel struct {
 }
 
 type AccountStatusModel struct {
-	AccountId uuid.UUID `json:"userId"`
+	AccountId uuid.UUID `json:"accountId"`
 	Status    string    `json:"status"`
 }
 

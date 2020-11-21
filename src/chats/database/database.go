@@ -1,16 +1,12 @@
 package database
 
 import (
+	"chats/system"
 	"chats/redis"
-	"chats/sentry"
-	"chats/infrastructure"
 	"fmt"
 	"gorm.io/gorm/logger"
-
-	//"github.com/jinzhu/gorm"
-	"gorm.io/gorm"
 	"gorm.io/driver/postgres"
-	"github.com/mkevac/gopinba"
+	"gorm.io/gorm"
 	"log"
 	"os"
 	"strconv"
@@ -21,7 +17,6 @@ type Storage struct {
 	Loc      *time.Location
 	Instance *gorm.DB
 	Redis    *redis.Redis
-	Pinba    *gopinba.Client
 }
 
 func Init() *Storage {
@@ -29,41 +24,20 @@ func Init() *Storage {
 	s.Loc = s.setLocation()    //	location
 	s.Instance = s.gormInit(0) //	gorm [mysql]
 	s.Redis = redis.Init(0)    //	redis
-	s.Pinba = s.pinbaInit()    //	pinba
-
 	return s
 }
 
 func (s *Storage) setLocation() *time.Location {
-	loc, err := infrastructure.Location()
+	loc, err := system.Location()
 	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
-			Message: infrastructure.LoadLocationError,
-			Code:    infrastructure.LoadLocationErrorCode,
+			Message: system.LoadLocationError,
+			Code:    system.LoadLocationErrorCode,
 		})
 	}
 
 	return loc
-}
-
-func (s *Storage) pinbaInit() *gopinba.Client {
-	pinbaHost := os.Getenv("PINBA_HOST")
-	pinba, err := gopinba.NewClient(pinbaHost)
-	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
-			Error:   err,
-			Message: PinbaConnectionProblem,
-			Code:    PinbaConnectionProblemCode,
-			Data:    []byte(pinbaHost),
-		})
-
-		log.Println("pinba connection problem") //	TODO
-
-		pinba = nil
-	}
-
-	return pinba
 }
 
 func (s *Storage) gormInit(attempt uint) *gorm.DB {
@@ -89,13 +63,13 @@ func (s *Storage) gormInit(attempt uint) *gorm.DB {
 
 	db, err := gorm.Open(postgres.Open(dsn), cfg)
 	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
 			Message: MysqlConnectionProblem + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
 			Code:    MysqlConnectionProblemCode,
 		})
 
-		infrastructure.Reconnect(MysqlConnectionProblem, &attempt)
+		system.Reconnect(MysqlConnectionProblem, &attempt)
 
 		return s.gormInit(attempt)
 	}

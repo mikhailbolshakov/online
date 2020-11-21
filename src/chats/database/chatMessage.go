@@ -3,7 +3,7 @@ package database
 import (
 	"chats/models"
 	"chats/sdk"
-	"chats/sentry"
+	"chats/system"
 	uuid "github.com/satori/go.uuid"
 	"strings"
 	"time"
@@ -37,7 +37,7 @@ func ValidateType(messageType string) bool {
 	return false
 }
 
-func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, opponentsId []uuid.UUID) *sentry.SystemError {
+func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, opponentsId []uuid.UUID) *system.Error {
 
 	if len(messageModel.ClientMessageId) > 0 {
 		checkMessage := &models.ChatMessage{}
@@ -55,7 +55,7 @@ func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, opponent
 	tx := db.Instance.Begin()
 	err := tx.Create(messageModel).Error
 	if err != nil {
-		return &sentry.SystemError{Error: err}
+		return &system.Error{Error: err}
 	}
 
 	for _, opponentId := range opponentsId {
@@ -76,14 +76,14 @@ func (db *Storage) NewMessageTransact(messageModel *models.ChatMessage, opponent
 
 	err = tx.Commit().Error
 	if err != nil {
-		return &sentry.SystemError{Error: err}
+		return &system.Error{Error: err}
 	}
 
 	return nil
 }
 
-func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.ChatMessagesResponseDataItem, *sentry.SystemError) {
-	subscribe := &models.ChatSubscribe{}
+func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.ChatMessagesResponseDataItem, *system.Error) {
+	subscribe := &models.RoomSubscriber{}
 	if params.Admin {
 		db.Instance.
 			Where("chat_id = ?", params.ChatId).
@@ -91,7 +91,7 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 	} else {
 		err := db.Check(params.ChatId, params.AccountId)
 		if err != nil {
-			return nil, &sentry.SystemError{Error: err}
+			return nil, &system.Error{Error: err}
 		}
 	}
 
@@ -131,7 +131,7 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 	rows, err := query.Rows()
 	defer rows.Close()
 	if err != nil {
-		return nil, &sentry.SystemError{Error: err}
+		return nil, &system.Error{Error: err}
 	}
 
 	var messages []sdk.ChatMessagesResponseDataItem
@@ -146,10 +146,10 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 		messages = append(messages, tmp)
 		messageIds = append(messageIds, message.Id)
 	}
-
+/*
 	mp, err := db.GetParams(messageIds)
 	if err != nil {
-		return nil, &sentry.SystemError{Error: err}
+		return nil, &system.Error{Error: err}
 	}
 
 	if len(mp) > 0 {
@@ -166,7 +166,7 @@ func (db *Storage) GetMessagesRecent(params *models.ChatMessageHistory) ([]sdk.C
 			}
 		}
 	}
-
+*/
 	return messages, nil
 }
 
@@ -176,7 +176,7 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 	}
 
 	if params.Admin {
-		subscribe := &models.ChatSubscribe{}
+		subscribe := &models.RoomSubscriber{}
 		db.Instance.
 			Where("chat_id = ?", params.ChatId).
 			Find(subscribe)
@@ -401,25 +401,25 @@ func (db *Storage) GetMessagesHistory(params *models.ChatMessageHistory) ([]sdk.
 		}
 	}
 
-	mp, err := db.GetParams(messageIds)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(mp) > 0 {
-		for i, message := range messages {
-			first := true
-			for _, item := range mp {
-				if message.Id == item.MessageId {
-					if first {
-						messages[i].Params = make(map[string]string)
-						first = false
-					}
-					messages[i].Params[item.Key] = item.Value
-				}
-			}
-		}
-	}
+	//mp, err := db.GetParams(messageIds)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//if len(mp) > 0 {
+	//	for i, message := range messages {
+	//		first := true
+	//		for _, item := range mp {
+	//			if message.Id == item.MessageId {
+	//				if first {
+	//					messages[i].Params = make(map[string]string)
+	//					first = false
+	//				}
+	//				messages[i].Params[item.Key] = item.Value
+	//			}
+	//		}
+	//	}
+	//}
 
 	return messages, nil
 }

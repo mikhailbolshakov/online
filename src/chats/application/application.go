@@ -2,19 +2,28 @@ package application
 
 import (
 	"chats/database"
-	"chats/sentry"
-	"chats/infrastructure"
+	"chats/system"
 	"chats/sdk"
+	"log"
 	"strconv"
 )
 
 type Application struct {
 	Sdk   *sdk.Sdk
 	DB    *database.Storage
-	Sentry *sentry.Sentry
+	Sentry *system.Sentry
+
 }
 
-func Init(sentry *sentry.Sentry) *Application {
+func Init() *Application {
+
+	sentry, err := system.InitSentry(nil)
+	system.ErrHandler.Sentry = sentry
+
+	if err != nil {
+		log.Fatalf("Sentry initialization error: %s", err)
+	}
+
 	return &Application{
 		Sdk:   sdkInit(0),
 		DB:    database.Init(),
@@ -23,15 +32,15 @@ func Init(sentry *sentry.Sentry) *Application {
 }
 
 func sdkInit(attempt uint) (init *sdk.Sdk) {
-	init, err := sdk.Init(infrastructure.SdkOptions())
+	init, err := sdk.Init(system.SdkOptions())
 	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
-			Message: infrastructure.SdkConnectionError + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
-			Code:    infrastructure.SdkConnectionErrorCode,
+			Message: system.SdkConnectionError + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
+			Code:    system.SdkConnectionErrorCode,
 		})
 
-		infrastructure.Reconnect(infrastructure.SdkConnectionError, &attempt)
+		system.Reconnect(system.SdkConnectionError, &attempt)
 
 		return sdkInit(attempt)
 	}

@@ -1,10 +1,9 @@
 package server
 
 import (
-	"chats/infrastructure"
+	"chats/system"
 	"chats/models"
 	"chats/sdk"
-	"chats/sentry"
 	"encoding/json"
 	"fmt"
 	uuid "github.com/satori/go.uuid"
@@ -18,7 +17,7 @@ const (
 
 //	Deprecated
 func (ws *WsServer) cronManager() {
-	if infrastructure.Cron() {
+	if system.Cron() {
 		go ws.userServiceMessageManager()
 		ws.consumer()
 	} else {
@@ -29,7 +28,7 @@ func (ws *WsServer) cronManager() {
 func (ws *WsServer) consumer() {
 	errorChan := make(chan *sdk.Error, 2048)
 	go ws.hub.app.Sdk.
-		Subject(infrastructure.CronTopic()).
+		Subject(system.CronTopic()).
 		CronConsumer(ws.cronMessagesHandler, errorChan)
 
 	ticker := time.NewTicker(time.Second * 5).C
@@ -50,7 +49,7 @@ func (ws *WsServer) consumer() {
 			}()
 
 		case err := <-errorChan:
-			infrastructure.SetError(&sentry.SystemError{
+			system.ErrHandler.SetError(&system.Error{
 				Error:   err.Error,
 				Message: err.Message,
 				Code:    err.Code,
@@ -66,8 +65,8 @@ func (ws *WsServer) provider() {
 
 		actualAccountIds := make([]uuid.UUID, 0, len(ws.hub.accounts))
 
-		for userId := range ws.hub.accounts {
-			actualAccountIds = append(actualAccountIds, userId)
+		for accountId := range ws.hub.accounts {
+			actualAccountIds = append(actualAccountIds, accountId)
 		}
 
 		cronMessage := &models.CronSendOnlineUsers{
@@ -79,10 +78,10 @@ func (ws *WsServer) provider() {
 
 		request, err := json.Marshal(cronMessage)
 		if err != nil {
-			infrastructure.MarshalError1011(err, nil)
+			system.MarshalError1011(err, nil)
 		} else {
 			go ws.hub.app.Sdk.
-				Subject(infrastructure.CronTopic()).
+				Subject(system.CronTopic()).
 				Publish(request)
 		}
 	}
@@ -102,12 +101,12 @@ func (ws *WsServer) cronMessagesHandler(request []byte) ([]byte, *sdk.Error) {
 	}
 }
 
-func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *sentry.SystemError) {
+func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *system.Error) {
 	cronMessage := &models.CronMessage{}
 
 	err := json.Unmarshal(data, cronMessage)
 	if err != nil {
-		return nil, infrastructure.UnmarshalRequestError1201(err, data)
+		return nil, system.UnmarshalRequestError1201(err, data)
 	}
 
 	switch cronMessage.Type {
@@ -115,7 +114,7 @@ func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *sentry.System
 		cronGetUserStatusRequest := &models.CronGetUserStatusRequest{}
 		err := json.Unmarshal(data, cronGetUserStatusRequest)
 		if err != nil {
-			return nil, infrastructure.UnmarshalRequestError1201(err, data)
+			return nil, system.UnmarshalRequestError1201(err, data)
 		}
 
 		cronGetUserStatusResponse := &models.CronGetAccountStatusResponse{}
@@ -132,7 +131,7 @@ func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *sentry.System
 
 		response, err := json.Marshal(cronGetUserStatusResponse)
 		if err != nil {
-			return nil, infrastructure.MarshalError1011(err, data)
+			return nil, system.MarshalError1011(err, data)
 		}
 
 		return response, nil
@@ -140,7 +139,7 @@ func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *sentry.System
 		cronSendOnlineUsers := &models.CronSendOnlineUsers{}
 		err := json.Unmarshal(data, cronSendOnlineUsers)
 		if err != nil {
-			return nil, infrastructure.UnmarshalRequestError1201(err, data)
+			return nil, system.UnmarshalRequestError1201(err, data)
 		}
 
 		for _, userId := range cronSendOnlineUsers.Data.Accounts {
@@ -154,12 +153,12 @@ func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *sentry.System
 		}
 		return nil, nil
 	default:
-		return nil, infrastructure.UnmarshalRequestTypeError1204(err, data)
+		return nil, system.UnmarshalRequestTypeError1204(err, data)
 	}
 }
 
 func (ws *WsServer) userServiceMessageManager() {
-	diff := infrastructure.CronStep()
+	diff := system.CronStep()
 	diffTime := time.Now().Add(-diff)
 
 	for {
@@ -172,7 +171,7 @@ func (ws *WsServer) userServiceMessageManager() {
 
 			/*
 			var title, text string
-			chat := ws.hub.app.DB.Chat(item.ChatId)
+			chat := ws.hub.app.DB.GetRoom(item.RoomId)
 
 			switch item.Role {
 			case database.UserTypeOperator:

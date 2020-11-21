@@ -25,3 +25,10 @@ type OnlineStatus struct {
 	Status    string    `gorm:"column:status"`
 	BaseModel
 }
+
+type GetAccountsCriteria struct {
+	AccountId uuid.UUID
+	ExternalId string
+	Email string
+	Phone string
+}

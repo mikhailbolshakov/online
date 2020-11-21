@@ -2,6 +2,7 @@ package sdk
 
 type SdkErrors map[int]string
 
+// TODO: change to system.Error
 type Error struct {
 	Error   error
 	Message string
@@ -9,6 +10,7 @@ type Error struct {
 	Data    []byte
 }
 
+// TODO: move to system
 var errList = SdkErrors{
 	1000: "Общая ошибка сервиса " + serviceName,
 	1001: "Ошибка соединения с шиной",

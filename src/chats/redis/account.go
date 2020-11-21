@@ -1,14 +1,13 @@
 package redis
 
 import (
-	"chats/infrastructure"
+	"chats/system"
 	"chats/models"
-	"chats/sentry"
 	"encoding/json"
 	uuid "github.com/satori/go.uuid"
 )
 
-func (r *Redis) GetAccountModelById(id uuid.UUID) (*models.Account, *sentry.SystemError) {
+func (r *Redis) GetAccountModelById(id uuid.UUID) (*models.Account, *system.Error) {
 	uid := uuid.UUID.String(id)
 
 	key := "account_id:" + uid
@@ -20,10 +19,10 @@ func (r *Redis) GetAccountModelById(id uuid.UUID) (*models.Account, *sentry.Syst
 
 		err := json.Unmarshal(val, account)
 		if err != nil {
-			return nil, &sentry.SystemError{
+			return nil, &system.Error{
 				Error:   err,
-				Message: infrastructure.UnmarshallingError,
-				Code:    infrastructure.UnmarshallingErrorCode,
+				Message: system.UnmarshallingError,
+				Code:    system.UnmarshallingErrorCode,
 				Data:    val,
 			}
 		}
@@ -36,7 +35,7 @@ func (r *Redis) GetAccountModelById(id uuid.UUID) (*models.Account, *sentry.Syst
 
 }
 
-func (r *Redis) GetAccountModelByExternalId(externalId string) (*models.Account, *sentry.SystemError) {
+func (r *Redis) GetAccountModelByExternalId(externalId string) (*models.Account, *system.Error) {
 
 	key := "account_ext_id:" + externalId
 	val, _ := r.Instance.Get(key).Bytes()
@@ -46,10 +45,10 @@ func (r *Redis) GetAccountModelByExternalId(externalId string) (*models.Account,
 
 		err := json.Unmarshal(val, account)
 		if err != nil {
-			return nil, &sentry.SystemError{
+			return nil, &system.Error{
 				Error:   err,
-				Message: infrastructure.UnmarshallingError,
-				Code:    infrastructure.UnmarshallingErrorCode,
+				Message: system.UnmarshallingError,
+				Code:    system.UnmarshallingErrorCode,
 				Data:    val,
 			}
 		}
@@ -59,7 +58,36 @@ func (r *Redis) GetAccountModelByExternalId(externalId string) (*models.Account,
 
 }
 
-func (r *Redis) SetAccount(account *models.Account) *sentry.SystemError {
+func (r *Redis) GetAccountOnlineStatus(accountId uuid.UUID) (string, *system.Error) {
+
+	if accountId == uuid.Nil {
+		return "", nil
+	}
+
+	key := "online:" + accountId.String()
+	val, _ := r.Instance.Get(key).Result()
+
+	return val, nil
+
+}
+
+func (r *Redis) SetAccountOnlineStatus(accountId uuid.UUID, status string) *system.Error {
+
+	if accountId == uuid.Nil {
+		return nil
+	}
+
+	key := "online:" + accountId.String()
+	err := r.Instance.Set(key, status, r.Ttl).Err()
+	if err != nil {
+		return system.E(err)
+	}
+
+	return nil
+
+}
+
+func (r *Redis) SetAccount(account *models.Account) *system.Error {
 	uid := uuid.UUID.String(account.Id)
 	key := "account_id:" + uid
 
@@ -67,13 +95,13 @@ func (r *Redis) SetAccount(account *models.Account) *sentry.SystemError {
 
 	setErr := r.Instance.Set(key, marshal, r.Ttl).Err()
 	if setErr != nil {
-		redisError := &sentry.SystemError{
+		redisError := &system.Error{
 			Error:   setErr,
 			Message: RedisSetError,
 			Code:    RedisSetErrorCode,
 			Data:    marshal,
 		}
-		infrastructure.SetError(redisError)
+		system.ErrHandler.SetError(redisError)
 
 		return redisError
 	}
@@ -83,13 +111,13 @@ func (r *Redis) SetAccount(account *models.Account) *sentry.SystemError {
 
 		setErr := r.Instance.Set(key, marshal, r.Ttl).Err()
 		if setErr != nil {
-			redisError := &sentry.SystemError{
+			redisError := &system.Error{
 				Error:   setErr,
 				Message: RedisSetError,
 				Code:    RedisSetErrorCode,
 				Data:    marshal,
 			}
-			infrastructure.SetError(redisError)
+			system.ErrHandler.SetError(redisError)
 
 			return redisError
 		}
@@ -97,3 +125,17 @@ func (r *Redis) SetAccount(account *models.Account) *sentry.SystemError {
 
 	return nil
 }
+
+func (r *Redis) DeleteAccounts(accountIds []uuid.UUID, externalIds []string) *system.Error {
+	var keys []string
+	for _, accId := range accountIds {
+		keys = append(keys,  "account_id:" + uuid.UUID.String(accId))
+		keys = append(keys,  "online:" + uuid.UUID.String(accId))
+	}
+	for _, extId := range externalIds {
+		keys = append(keys,  "account_ext_id:" + extId)
+	}
+	r.Instance.Del(keys...)
+	return nil
+}
+

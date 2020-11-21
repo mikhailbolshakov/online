@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+option go_package = "chats/proto";
+
+package proto;
+
+message UUID {
+  string Value = 1;
+}
+
+message Timestamp {
+  string Value = 1;
+}
+
+message Error {
+  int32 Code = 1;
+  string Message = 2;
+}
+
+message AccountIdRequest {
+  UUID AccountId = 1;
+  string ExternalId = 2;
+}

@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+option go_package = "chats/proto";
+
+package proto;
+
+import "common.proto";
+
+message SubscriberRequest {
+  AccountIdRequest Account = 1;
+  string Role = 2;
+}
+
+message RoomResponse {
+  UUID Id = 1;
+  string Hash = 2;
+}
+
+message CreateRoomRequest {
+  string ReferenceId = 1;
+  bool Chat = 2;
+  bool Video = 3;
+  bool Audio = 4;
+  repeated SubscriberRequest Subscribers = 5;
+}
+
+message CreateRoomResponse {
+  RoomResponse Result = 1;
+  repeated Error Errors = 2;
+}
+
+message GetSubscriberResponse {
+  UUID Id = 1;
+  UUID AccountId = 2;
+  string Role = 3;
+  Timestamp UnSubscribeAt = 4;
+}
+
+message GetRoomResponse {
+  UUID Id = 1;
+  string Hash = 2;
+  string ReferenceId = 3;
+  bool Chat = 4;
+  bool Video = 5;
+  bool Audio = 6;
+  Timestamp ClosedAt = 7;
+  repeated GetSubscriberResponse Subscribers = 8;
+}
+
+message GetRoomsByCriteriaRequest {
+  string ReferenceId = 1;
+  AccountIdRequest AccountId = 2;
+  UUID RoomId = 3;
+  bool WithClosed = 4;
+  bool WithSubscribers = 5;
+}
+
+message GetRoomsByCriteriaResponse {
+  repeated GetRoomResponse Rooms = 1;
+  repeated Error Errors = 2;
+}
+
+message RoomSubscribeRequest {
+  UUID RoomId = 1;
+  string ReferenceId = 2;
+  repeated SubscriberRequest Subscribers = 3;
+}
+
+message RoomSubscribeResponse {
+  repeated GetRoomResponse Rooms = 1;
+  repeated Error Errors = 2;
+}
+
+message CloseRoomRequest {
+  UUID RoomId = 1;
+  string ReferenceId = 2;
+}
+
+message CloseRoomResponse {
+  repeated Error Errors = 1;
+}
+
+service Room {
+  rpc Create(CreateRoomRequest) returns (CreateRoomResponse) {}
+  rpc Subscribe(RoomSubscribeRequest) returns (RoomSubscribeResponse) {}
+  rpc GetByCriteria(GetRoomsByCriteriaRequest) returns (GetRoomsByCriteriaResponse) {}
+  rpc CloseRoom(CloseRoomRequest) returns (CloseRoomResponse) {}
+}
+

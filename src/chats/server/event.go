@@ -1,12 +1,10 @@
 package server
 
 import (
-	"chats/converter"
 	"chats/database"
-	"chats/infrastructure"
 	"chats/models"
 	"chats/sdk"
-	"chats/sentry"
+	"chats/system"
 	"encoding/json"
 	uuid "github.com/satori/go.uuid"
 	"log"
@@ -20,14 +18,11 @@ const (
 	EventMessageStatus         = "messageStatus"
 	EventTyping                = "typing"
 	EventOpponentStatus        = "opponentStatus"
-	EventConsultationUpdate    = "consultationUpdate"
 	EventClientConnectionError = "clientConnectionError"
 )
 
 const (
-	EventTypingOperatorMessage = "печатает"
-	EventTypingDoctorMessage   = "печатает"
-	EventTypingClientMessage   = "Пациент пишет ответ"
+	EventTypingMessage = "печатает"
 
 	UserStatusOnline  = "online"
 	UserStatusOffline = "offline"
@@ -39,45 +34,46 @@ func NewEvent() *Event {
 	return &Event{}
 }
 
-func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
-	loc, err := infrastructure.Location()
+func (e *Event) EventMessage(h *Hub, c *Session, clientRequest []byte) {
+
+	loc, err := system.Location()
 	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
-			Message: infrastructure.LoadLocationError,
-			Code:    infrastructure.LoadLocationErrorCode,
+			Message: system.LoadLocationError,
+			Code:    system.LoadLocationErrorCode,
 		})
 	}
 
 	request := &models.WSChatMessagesRequest{}
 	err = json.Unmarshal(clientRequest, request)
 	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
-			Message: infrastructure.UnmarshallingError,
-			Code:    infrastructure.UnmarshallingErrorCode,
+			Message: system.UnmarshallingError,
+			Code:    system.UnmarshallingErrorCode,
 			Data:    clientRequest,
 		})
 
 		return
 	}
 
-	var chatId uuid.UUID
-	messages := []interface{}{}
+	var roomId uuid.UUID
+	var messages []interface{}
 	accounts := make(map[uuid.UUID]sdk.Account)
-	subscribers := []database.SubscribeAccountModel{}
+	var subscribers []models.RoomSubscriber
 
 	for _, item := range request.Data.Messages {
 		if len(item.Text) > maxMessageSize {
-			infrastructure.SetError(&sentry.SystemError{
-				Message: infrastructure.MessageTooLongError,
-				Code:    infrastructure.MessageTooLongErrorCode,
+			system.ErrHandler.SetError(&system.Error{
+				Message: system.MessageTooLongError,
+				Code:    system.MessageTooLongErrorCode,
 				Data:    clientRequest,
 			})
 			return
 		}
-		if item.ChatId == uuid.Nil {
-			infrastructure.SetError(&sentry.SystemError{
+		if item.RoomId == uuid.Nil {
+			system.ErrHandler.SetError(&system.Error{
 				Message: database.MysqlChatIdIncorrect,
 				Code:    database.MysqlChatIdIncorrectCode,
 				Data:    clientRequest,
@@ -85,12 +81,15 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 			return
 		}
 
-		if chatId == uuid.Nil {
-			chatId = item.ChatId
-			subscribers = h.app.DB.ChatSubscribes(chatId)
+		if roomId == uuid.Nil {
+			roomId = item.RoomId
+			subscribers, e := h.app.DB.GetRoomSubscribers(roomId)
+			if e != nil {
+				system.ErrHandler.SetError(e)
+			}
 
 			if len(subscribers) == 0 {
-				infrastructure.SetError(&sentry.SystemError{
+				system.ErrHandler.SetError(&system.Error{
 					Error:   err,
 					Message: database.MysqlChatSubscribeEmpty,
 					Code:    database.MysqlChatSubscribeEmptyCode,
@@ -102,7 +101,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 
 		var subscriberId = uuid.Nil
 		var subscriberType string
-		opponentsId := []uuid.UUID{}
+		var opponentsId []uuid.UUID
 
 		for _, subscriber := range subscribers {
 			if _, ok := accounts[subscriber.AccountId]; !ok {
@@ -110,21 +109,21 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 				account, err := h.app.DB.GetAccount(subscriber.AccountId, "")
 
 				if err != nil {
-					infrastructure.SetError(err)
+					system.ErrHandler.SetError(err)
 					return
 				}
-				accounts[subscriber.AccountId] = *converter.ConvertAccountFromModel(account)
+				accounts[subscriber.AccountId] = *ConvertAccountFromModel(account)
 			}
 			if subscriber.AccountId == c.account.Id {
-				subscriberId = subscriber.SubscribeId
+				subscriberId = subscriber.Id
 				subscriberType = subscriber.Role
 			} else {
-				opponentsId = append(opponentsId, subscriber.SubscribeId)
+				opponentsId = append(opponentsId, subscriber.Id)
 			}
 		}
 
 		if subscriberId == uuid.Nil {
-			infrastructure.SetError(&sentry.SystemError{
+			system.ErrHandler.SetError(&system.Error{
 				Error:   err,
 				Message: database.MysqlChatAccessDenied,
 				Code:    database.MysqlChatAccessDeniedCode,
@@ -135,14 +134,14 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 
 		paramsJson, err := json.Marshal(item.Params)
 		if err != nil {
-			infrastructure.SetError(&sentry.SystemError{Error: err})
+			system.ErrHandler.SetError(&system.Error{Error: err})
 		}
 
 		id, _ := uuid.NewV4()
 		dbMessage := &models.ChatMessage{
 			Id:              id,
 			ClientMessageId: item.ClientMessageId,
-			ChatId:          chatId,
+			ChatId:          roomId,
 			Type:            item.Type,
 			SubscribeId:     subscriberId,
 			Message:         item.Text,
@@ -151,7 +150,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 
 		sentryErr := h.app.DB.NewMessageTransact(dbMessage, opponentsId)
 		if sentryErr != nil {
-			infrastructure.SetError(sentryErr)
+			system.ErrHandler.SetError(sentryErr)
 			return
 		}
 
@@ -159,7 +158,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 			Id:              dbMessage.Id,
 			ClientMessageId: item.ClientMessageId,
 			InsertDate:      dbMessage.CreatedAt.In(loc).Format(time.RFC3339),
-			ChatId:          chatId,
+			ChatId:          roomId,
 			AccountId:       c.account.Id,
 			Sender:          subscriberType,
 			Status:          database.MessageStatusRecd,
@@ -168,9 +167,9 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 		}
 		if len(dbMessage.FileId) > 0 {
 			file := &sdk.FileModel{Id: dbMessage.FileId}
-			sdkErr := h.app.Sdk.File(file, chatId, c.account.Id)
+			sdkErr := h.app.Sdk.File(file, roomId, c.account.Id)
 			if sdkErr != nil {
-				infrastructure.SetError(&sentry.SystemError{
+				system.ErrHandler.SetError(&system.Error{
 					Error:   sdkErr.Error,
 					Message: sdkErr.Message,
 					Code:    sdkErr.Code,
@@ -189,7 +188,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 	}
 
 	//	отправка обратно в веб-сокет
-	if chatId != uuid.Nil {
+	if roomId != uuid.Nil {
 		clients := []sdk.Account{}
 		for _, item := range accounts {
 			clients = append(clients, item)
@@ -204,7 +203,7 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 		}
 
 		response := &RoomMessage{
-			RoomId:  chatId,
+			RoomId:  roomId,
 			Message: responseMessage,
 		}
 
@@ -212,18 +211,18 @@ func (e *Event) EventMessage(h *Hub, c *Client, clientRequest []byte) {
 	}
 }
 
-func (e *Event) EventMessageStatus(h *Hub, c *Client, clientRequest []byte) {
+func (e *Event) EventMessageStatus(h *Hub, c *Session, clientRequest []byte) {
 	request := &models.WSChatMessageStatusRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		infrastructure.UnmarshalRequestError1201(err, clientRequest)
+		system.UnmarshalRequestError1201(err, clientRequest)
 		return
 	}
 
 	err = h.app.DB.SetReadStatus(request.Data.MessageId)
 
 	if err != nil {
-		infrastructure.SetError(&sentry.SystemError{
+		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
 			Message: WsChangeMessageStatusError,
 			Code:    WsChangeMessageStatusErrorCode,
@@ -248,23 +247,28 @@ func (e *Event) EventMessageStatus(h *Hub, c *Client, clientRequest []byte) {
 	h.SendMessageToRoom(response)
 }
 
-func (e *Event) EventOpponentStatus(h *Hub, c *Client, clientRequest []byte) {
+func (e *Event) EventOpponentStatus(h *Hub, c *Session, clientRequest []byte) {
 	request := &models.WSChatOpponentStatusRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		infrastructure.SetError(infrastructure.UnmarshalRequestError1201(err, clientRequest))
+		system.ErrHandler.SetError(system.UnmarshalRequestError1201(err, clientRequest))
 		return
 	}
 
-	chatId := request.Data.ChatId
-	subscribes := h.app.DB.ChatSubscribes(chatId)
-	users := []models.AccountStatusModel{}
+	roomId := request.Data.RoomId
+	subscribes, error := h.app.DB.GetRoomSubscribers(roomId)
+	if error != nil {
+		system.ErrHandler.SetError(error)
+	}
+
+	accounts := []models.AccountStatusModel{}
 
 	for _, subscribe := range subscribes {
-		user := &models.AccountStatusModel{AccountId: subscribe.AccountId}
 
-		switch subscribe.Role {
-		case database.UserTypeClient:
+		account := &models.AccountStatusModel{AccountId: subscribe.AccountId}
+
+		if c.account.Id != subscribe.AccountId && subscribe.Role != UserTypeBot {
+
 			cronGetUserStatusRequestMessage := &models.CronGetUserStatusRequest{
 				Type: MessageTypeGetUserStatus,
 				Data: models.CronGetAccountStatusRequestData{
@@ -274,19 +278,19 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Client, clientRequest []byte) {
 
 			request, err := json.Marshal(cronGetUserStatusRequestMessage)
 			if err != nil {
-				infrastructure.SetError(infrastructure.MarshalError1011(err, clientRequest))
+				system.ErrHandler.SetError(system.MarshalError1011(err, clientRequest))
 				return
 			}
 
 			response, cronRequestError := h.app.Sdk.
-				Subject(infrastructure.CronTopic()).
+				Subject(system.CronTopic()).
 				Request(request)
 
 			if cronRequestError != nil {
-				infrastructure.SetError(&sentry.SystemError{
+				system.ErrHandler.SetError(&system.Error{
 					Error:   cronRequestError.Error,
-					Message: infrastructure.CronResponseError,
-					Code:    infrastructure.CronResponseErrorCode,
+					Message: system.CronResponseError,
+					Code:    system.CronResponseErrorCode,
 					Data:    append(request, response...),
 				})
 				return
@@ -295,32 +299,27 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Client, clientRequest []byte) {
 			cronGetUserResponse := &models.CronGetAccountStatusResponse{}
 			err = json.Unmarshal(response, cronGetUserResponse)
 			if err != nil {
-				infrastructure.SetError(infrastructure.MarshalError1011(err, response))
+				system.ErrHandler.SetError(system.MarshalError1011(err, response))
 				return
 			}
 
 			if cronGetUserResponse.Online {
-				user.Status = UserStatusOnline
+				account.Status = UserStatusOnline
 			} else {
-				user.Status = UserStatusOffline
+				account.Status = UserStatusOffline
 			}
-			break
-		default:
-			//	оператор и доктор всегда в сети
-			user.Status = UserStatusOnline
-			break
 		}
 
-		users = append(users, *user)
+		accounts = append(accounts, *account)
 	}
 
 	response := &RoomMessage{
-		RoomId: chatId,
+		RoomId: roomId,
 		Message: &models.WSChatResponse{
 			Type: EventOpponentStatus,
 			Data: models.WSChatOpponentStatusDataResponse{
-				ChatId:   chatId,
-				Accounts: users,
+				RoomId:   roomId,
+				Accounts: accounts,
 			},
 		},
 	}
@@ -330,11 +329,11 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Client, clientRequest []byte) {
 	return
 }
 
-func (e *Event) EventJoin(h *Hub, c *Client, clientRequest []byte) {
+func (e *Event) EventJoin(h *Hub, c *Session, clientRequest []byte) {
 	request := &models.WSChatJoinRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		infrastructure.UnmarshalRequestError1201(err, clientRequest)
+		system.UnmarshalRequestError1201(err, clientRequest)
 		return
 	}
 
@@ -343,51 +342,33 @@ func (e *Event) EventJoin(h *Hub, c *Client, clientRequest []byte) {
 	return
 }
 
-func (e *Event) EventTyping(h *Hub, c *Client, clientRequest []byte) {
+func (e *Event) EventTyping(h *Hub, c *Session, clientRequest []byte) {
 	request := &models.WSChatTypingRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		infrastructure.UnmarshalRequestError1201(err, clientRequest)
+		system.UnmarshalRequestError1201(err, clientRequest)
 		return
 	}
 
-	if chat, ok := h.rooms[request.Data.ChatId]; ok {
-		for _, subscriber := range chat.subscribers {
-			if subscriber.AccountId == c.account.Id {
-				var message string
+	if room, ok := h.rooms[request.Data.RoomId]; ok {
+		for _, subscriber := range room.subscribers {
+			if subscriber.AccountId != c.account.Id {
 
-				switch subscriber.Role {
-				case database.UserTypeOperator:
-					message = EventTypingOperatorMessage
-					break
-				case database.UserTypeDoctor:
-					message = EventTypingDoctorMessage
-					break
-				case database.UserTypeClient:
-					message = EventTypingClientMessage
-					break
+				message := EventTypingMessage
+
+				response := &RoomMessage{
+					AccountId: subscriber.AccountId,
+					Message: &models.WSChatResponse{
+						Type: EventTyping,
+						Data: models.WSChatTypingDataResponse{
+							AccountId: c.account.Id,
+							Message:   message,
+							Status:    request.Data.Status,
+						},
+					},
 				}
 
-				if len(message) > 0 {
-					for _, subscriber := range chat.subscribers {
-						//	Не отправлять сообщение о тайпенге пользователю, который этот тайпинг совершает
-						if subscriber.AccountId != c.account.Id {
-							response := &RoomMessage{
-								AccountId: subscriber.AccountId,
-								Message: &models.WSChatResponse{
-									Type: EventTyping,
-									Data: models.WSChatTypingDataResponse{
-										AccountId: c.account.Id,
-										Message:   message,
-										Status:    request.Data.Status,
-									},
-								},
-							}
-
-							h.SendMessageToRoom(response)
-						}
-					}
-				}
+				h.SendMessageToRoom(response)
 
 				return
 			}
@@ -397,11 +378,11 @@ func (e *Event) EventTyping(h *Hub, c *Client, clientRequest []byte) {
 	return
 }
 
-func (e *Event) EventEcho(h *Hub, c *Client, clientRequest []byte) {
+func (e *Event) EventEcho(h *Hub, c *Session, clientRequest []byte) {
 	request := &models.WSChatEchoRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
-		infrastructure.UnmarshalRequestError1201(err, clientRequest)
+		system.UnmarshalRequestError1201(err, clientRequest)
 		return
 	}
 
@@ -415,7 +396,7 @@ func (e *Event) EventEcho(h *Hub, c *Client, clientRequest []byte) {
 		log.Println("Не удалось сформировать ответ клиенту")
 		log.Println(err)
 	} else {
-		h.sendMessageToClient(c, response)
+		h.sendMessage(c, response)
 	}
 
 	return

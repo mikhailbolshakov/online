@@ -7,3 +7,4 @@ type BaseModel struct {
 	UpdatedAt time.Time
 	DeletedAt *time.Time `sql:"index"`
 }
+

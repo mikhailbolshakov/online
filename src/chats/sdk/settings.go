@@ -17,19 +17,5 @@ const (
 	storageTopic    = "storage.1.0"
 	storageFilePath = "/file"
 
-	//	telemed
-	telemedTopic              = "telemed.1.0"
-	consultationWebsocketPath = "/consultation/websocket"
-	consultationPath          = "/consultation/%d"
 
-	//	doctors
-	doctorsTopic              = "doctors.1.0"
-	doctorsSpecializationPath = "/doctors/%d/specialization"
-	doctorIdPath              = "/doctors/%d/ws"
-
-	//	personal
-	personalTopic = "personal.1.0"
-	//	patient
-	personalUserIdPath = "/user/%d"
-	patientIdPath      = "/patients/%d/ws"
 )
