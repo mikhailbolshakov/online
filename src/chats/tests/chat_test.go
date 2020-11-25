@@ -1,14 +1,11 @@
 package tests
 
 import (
-	"chats/models"
 	pb "chats/proto"
 	"chats/server"
 	"chats/system"
 	"chats/tests/helper"
 	"context"
-	uuid "github.com/satori/go.uuid"
-	"log"
 	"testing"
 	"time"
 )
@@ -69,7 +66,7 @@ func TestNewRoomMessageExchange_Success(t *testing.T) {
 	go helper.ReadMessages(wsFirst, msgChanFirst, roomId, accountIdFirst, receivedChan, done, true)
 	go helper.ReadMessages(wsSecond, msgChanSecond, roomId, accountIdSecond, receivedChan, done, true)
 
-	err = helper.SendMessage(wsFirst, accountIdFirst, server.EventMessage, &models.WSChatMessageDataRequest{
+	err = helper.SendMessage(wsFirst, accountIdFirst, server.EventMessage, &server.WSChatMessageDataRequest{
 		RoomId: roomId,
 		Type:   "message",
 		Text:   "привет второй",
@@ -79,7 +76,7 @@ func TestNewRoomMessageExchange_Success(t *testing.T) {
 		t.Fatal("Failed")
 	}
 
-	err = helper.SendMessage(wsSecond, accountIdSecond, server.EventMessage, &models.WSChatMessageDataRequest{
+	err = helper.SendMessage(wsSecond, accountIdSecond, server.EventMessage, &server.WSChatMessageDataRequest{
 		RoomId: roomId,
 		Type:   "message",
 		Text:   "привет первый",
@@ -106,45 +103,3 @@ func TestNewRoomMessageExchange_Success(t *testing.T) {
 
 }
 
-func TestGetChatInfo_Success(t *testing.T) {
-
-	sdkService, err := helper.InitSdk()
-	if err != nil {
-		t.Fatal(err.Error(), sdkService)
-	}
-
-	chatInfo, err := helper.GetChatInfo(sdkService,
-							uuid.FromStringOrNil("c7dc4c3c-7d88-4a4e-ae90-2b1775158405"),
-							uuid.FromStringOrNil("093d596a-4299-4ad1-9f77-4677adb3ce96"),
-							"")
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, item := range chatInfo.Data {
-		log.Println(item)
-	}
-
-}
-
-func TestGetChatsByAccount_Success(t *testing.T) {
-
-	sdkService, err := helper.InitSdk()
-	if err != nil {
-		t.Fatal(err.Error(), sdkService)
-	}
-
-	chats, err := helper.GetChatsByAccount(sdkService,
-		uuid.FromStringOrNil("093d596a-4299-4ad1-9f77-4677adb3ce96"),
-		"")
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, item := range chats.Data {
-		log.Println(item)
-	}
-
-}

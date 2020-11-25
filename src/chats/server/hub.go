@@ -1,13 +1,11 @@
 package server
 
 import (
-	"chats/application"
+	"chats/app"
 	"chats/system"
-	"chats/models"
-	"chats/sdk"
+	r "chats/repository/room"
 	"encoding/json"
 	uuid "github.com/satori/go.uuid"
-	"log"
 	"sync"
 	"time"
 )
@@ -22,10 +20,9 @@ type Hub struct {
 	unregisterChan  chan *Session
 	messageChan     chan *RoomMessage
 	router          *Router
-	app             *application.Application
 }
 
-func NewHub(app *application.Application) *Hub {
+func NewHub() *Hub {
 
 	return &Hub{
 		sessions:        make(map[uuid.UUID]*Session),
@@ -36,7 +33,6 @@ func NewHub(app *application.Application) *Hub {
 		unregisterChan:  make(chan *Session),
 		messageChan:     make(chan *RoomMessage),
 		router:          SetRouter(),
-		app:             app,
 	}
 }
 
@@ -47,23 +43,23 @@ func (h *Hub) Run() {
 			h.sessions[session.sessionId] = session
 			h.accountSessions[session.account.Id] = session
 			h.accounts[session.account.Id] = true
-			log.Println(">>> session register:", session.account.Id) //	TODO
+			app.L().Debug(">>> session register:", session.account.Id) //	TODO
 			h.checkConnectionStatus(session.account.Id, true)
 		case session := <-h.unregisterChan:
 			go h.clientConnectionChange(session)
 			h.onSessionDisconnect(session)
-			log.Println(">>> session unregister:", session.account.Id) //	TODO
+			app.L().Debug(">>> session unregister:", session.account.Id) //	TODO
 			h.checkConnectionStatus(session.account.Id, false)
 		case message := <-h.messageChan:
-			log.Printf("Sending message to internal topic: %v \n", message.Message)
+			app.L().Debugf("Sending message to internal topic: %v \n", message.Message)
 
 			{ //	Scaling
 				answer, err := json.Marshal(message)
 				if err != nil {
-					log.Println("Не удалось сформировать ответ клиенту")
-					log.Println(err)
+					app.L().Debug("Не удалось сформировать ответ клиенту")
+					app.L().Debug(err)
 				} else {
-					go h.app.Sdk.Subject(system.InsideTopic()).Publish(answer) //	return sentry
+					go app.Instance.Inf.Nats.Subject(app.Instance.Inf.Nats.InsideTopic()).Publish(answer) //	return sentry
 				}
 			}
 		}
@@ -83,7 +79,7 @@ func (h *Hub) onSessionDisconnect(session *Session) {
 	}
 }
 
-func (h *Hub) accountHasSessions(account *sdk.Account) bool {
+func (h *Hub) accountHasSessions(account *Account) bool {
 	for _, s := range h.sessions {
 		if s.account.Id == account.Id {
 			return true
@@ -107,7 +103,8 @@ func (h *Hub) removeAllSessions() {
 
 func (h *Hub) LoadRoomIfNotExists(roomId uuid.UUID) *Room {
 
-	subscribers := h.app.DB.GetRoomAccountSubscribers(roomId)
+	rep := r.CreateRepository(app.Instance.Inf.DB)
+	subscribers := rep.GetRoomAccountSubscribers(roomId)
 
 	h.roomMutex.Lock()
 	defer h.roomMutex.Unlock()
@@ -115,11 +112,11 @@ func (h *Hub) LoadRoomIfNotExists(roomId uuid.UUID) *Room {
 	if _, ok := h.rooms[roomId]; !ok {
 		room := InitRoom(roomId, subscribers)
 		h.rooms[roomId] = room
-		log.Printf("New room is loaded. room_id %s \n", roomId)
+		app.L().Debugf("New room is loaded. room_id %s \n", roomId)
 		return room
 	} else {
 		h.rooms[roomId].subscribers = subscribers
-		log.Printf("Existent room is found. room_id %s \n", roomId)
+		app.L().Debugf("Existent room is found. room_id %s \n", roomId)
 	}
 
 	return h.rooms[roomId]
@@ -144,10 +141,10 @@ func (h *Hub) checkConnectionStatus(userId uuid.UUID, online bool) {
 	/*
 	if !online {
 		if _, ok := h.accountSessions[userId]; !ok {
-			go h.app.Sdk.ChangeConnectionStatus(userId, online)
+			go h.inf.Nats.ChangeConnectionStatus(userId, online)
 		}
 	} else {
-		go h.app.Sdk.ChangeConnectionStatus(userId, online)
+		go h.inf.Nats.ChangeConnectionStatus(userId, online)
 	}
 	 */
 }
@@ -156,51 +153,52 @@ func (h *Hub) clientConnectionChange(session *Session) {
 	time.Sleep(10 * time.Second)
 
 	//	todo вынести в отдельный метод
-	cronGetUserStatusRequestMessage := &models.CronGetUserStatusRequest{
+	cronGetUserStatusRequestMessage := &CronGetUserStatusRequest{
 		Type: MessageTypeGetUserStatus,
-		Data: models.CronGetAccountStatusRequestData{
+		Data: CronGetAccountStatusRequestData{
 			AccountId: session.account.Id,
 		},
 	}
 
 	request, err := json.Marshal(cronGetUserStatusRequestMessage)
 	if err != nil {
-		system.ErrHandler.SetError(system.MarshalError1011(err, nil))
+		app.E().SetError(system.MarshalError1011(err, nil))
 		return
 	}
 
-	response, cronRequestError := h.app.Sdk.
-		Subject(system.CronTopic()).
+	response, cronRequestError := app.GetNats().
+		Subject(app.GetNats().CronTopic()).
 		Request(request)
 
 	if cronRequestError != nil {
-		system.ErrHandler.SetError(&system.Error{
+		app.E().SetError(&system.Error{
 			Error:   cronRequestError.Error,
-			Message: system.CronResponseError,
+			Message: system.GetError(system.CronResponseErrorCode),
 			Code:    system.CronResponseErrorCode,
 			Data:    append(request, response...),
 		})
 		return
 	}
 
-	cronGetUserResponse := &models.CronGetAccountStatusResponse{}
+	cronGetUserResponse := &CronGetAccountStatusResponse{}
 	err = json.Unmarshal(response, cronGetUserResponse)
 	if err != nil {
-		system.ErrHandler.SetError(system.MarshalError1011(err, response))
+		app.E().SetError(system.MarshalError1011(err, response))
 		return
 	}
 
 	if !cronGetUserResponse.Online {
 		//if _, ok := h.accountSessions[session.account.Id]; !ok {	//	plan B
-		opponentId := h.app.DB.LastOpponentId(session.account.Id)
+		rep := r.CreateRepository(app.GetDB())
+		opponentId := rep.LastOpponentId(session.account.Id)
 
 		if opponentId != uuid.Nil {
-			data := new(models.AccountStatusModel)
+			data := new(WSAccountStatusModel)
 			data.AccountId = session.account.Id
 
 			roomMessage := &RoomMessage{
 				AccountId: opponentId,
-				Message: &models.WSChatResponse{
+				Message: &WSChatResponse{
 					Type: EventClientConnectionError,
 					Data: &data,
 				},
@@ -211,7 +209,7 @@ func (h *Hub) clientConnectionChange(session *Session) {
 
 		/*for chatId, item := range session.subscribers {
 			if item.Role == database.UserTypeClient {
-				data := new(models.AccountStatusModel)
+				data := new(models.WSAccountStatusModel)
 				data.AccountId = session.account.Id
 
 				roomMessage := &RoomMessage{

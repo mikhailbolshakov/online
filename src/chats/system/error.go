@@ -1,115 +1,129 @@
 package system
 
-import (
-	"chats/sdk"
-	"log"
+const (
+
+	ApplicationErrorCode    = 200
+	UnmarshallingErrorCode  = 201
+	ParseErrorCode          = 205
+	LoadLocationErrorCode   = 210
+	MessageTooLongErrorCode = 220
+	SdkConnectionErrorCode  = 230
+	CronResponseErrorCode   = 301
+
 )
 
-/**
-websocket 100
-service	200
-database 300
-nats 400
-redis 500
-sentry 600
-*/
+var errList = Errors {
+
+	200: "Общая ошибка приложения",
+	201: "Ошибка при анмаршаллинге",
+	205: "Ошибка установки временной зоны",
+	210: "Длина сообщения превышает установленный лимит",
+	220: "Длина сообщения превышает установленный лимит",
+	230: "Ошибка соединения с шиной",
+	301: "Ошибка ответа от cron",
+
+	1000: "Общая ошибка сервиса %s",
+	1001: "Ошибка соединения с шиной",
+	1002: "Неизвестная ошибка сервиса %s",
+
+	1010: "Ошибка при анмаршалинге",
+	1011: "Ошибка ответа", //	ResponseError
+	1012: "Пустое тело ответа",
+	1101: "Не указан топик",
+
+	1201: "Ошибка запроса", //	RequestError
+	1202: "Ошибка подготовки запроса",
+	1203: "Ошибка запроса: Метод не найден",
+	1204: "Ошибка запроса: Тип не найден",
+
+	1300: "", //	user
+	1400: "", //	file
+	1401: "Передан некорректный параметр fileId",
+	1402: "Передан некорректный параметр chatId",
+	1403: "Передан некорректный параметр userId",
+	1404: "Передан некорректный параметр type",
+	1405: "Передан некорректный параметр orderId",
+}
+
 
 const (
-	ApplicationError        = "Общая ошибка приложения"
-	ApplicationErrorCode    = 200
-	UnmarshallingError      = "Ошибка при анмаршаллинге"
-	UnmarshallingErrorCode  = 201
-	ParseError              = "Ошибка при парсинге"
-	ParseErrorCode          = 205
-	LoadLocationError       = "Ошибка установки временной зоны"
-	LoadLocationErrorCode   = 210
-	MessageTooLongError     = "Длина сообщения превышает установленный лимит"
-	MessageTooLongErrorCode = 220
-	SdkConnectionError      = "Ошибка соединения с шиной"
-	SdkConnectionErrorCode  = 230
-	CronResponseError       = "Ошибка ответа от cron"
-	CronResponseErrorCode   = 301
+	MysqlErrorCode                    = 300 //	общая ошибка
+	MysqlConnectionProblem            = "Ошибка соединения с базой данных mysql"
+	MysqlConnectionProblemCode        = 301
+	MysqlChatCreateError              = "Ошибка при попытке создать новый чат"
+	MysqlChatCreateErrorCode          = 321
+	MysqlChatUserSubscribeError       = "Ошибка при попытке подписать пользователя на чат"
+	MysqlChatUserSubscribeErrorCode   = 322
+	MysqlChatUserUnsubscribeError     = "Ошибка при попытке отписать пользователя от чата"
+	MysqlChatUserUnsubscribeErrorCode = 323
+	MysqlChatCreateMessageError       = "Ошибка при попытке создания нового сообщения"
+	MysqlChatCreateMessageErrorCode   = 324
+	MysqlChatSubscribeEmpty           = "У чата нет подписчиков"
+	MysqlChatSubscribeEmptyCode       = 325
+	MysqlChatSubscribeChangeError     = "Ошибка при попытке поменять подписчика на чат"
+	MysqlChatSubscribeChangeErrorCode = 326
+	MysqlChatNotExists                = "Чат не найден"
+	MysqlChatNotExistsCode            = 330
+	MysqlChatChangeStatusError        = "Ошибка при попытке изменить статус чата"
+	MysqlChatChangeStatusErrorCode    = 331
+	MysqlUserChatListError            = "Ошибка при выборе списка чатов пользователя"
+	MysqlUserChatListErrorCode        = 340
+	MysqlChatInfoError                = "Ошибка при получении информации о чате"
+	MysqlChatInfoErrorCode            = 341
+	MysqlChatMessageParamsError       = "Ошибка при получении списка параметров сообщения"
+	MysqlChatMessageParamsErrorCode   = 342
+	MysqlChatIdIncorrect              = "Передан некорректный параметр chatId"
+	MysqlChatIdIncorrectCode          = 350
+	MysqlChatMessageTypeIncorrect     = "Передан некорректный параметр type"
+	MysqlChatMessageTypeIncorrectCode = 351
+	MysqlChatAccessDenied             = "Пользователь не подписан на чат"
+	MysqlChatAccessDeniedCode         = 501
+
+	DbAccountOnlineStatusUpdateError = "Ошибка при обновлении online статуса"
+	DbAccountOnlineStatusUpdateErrorCode = 601
+	DbAccountOnlineStatusGetError = "Ошибка при получении online статуса"
+	DbAccountOnlineStatusGetErrorCode = 602
+	DbAccountOnlineStatusGetMoreThenOneError = "Найдено более одного online статуса"
+	DbAccountOnlineStatusGetMoreThenOneErrorCode = 603
+	DbAccountOnlineStatusGetNotFoundError = "online статус не найден"
+	DbAccountOnlineStatusGetNotFoundErrorCode = 604
 )
 
-type ErrorHandler struct {
-	Sentry *Sentry
-}
+const (
+	RedisConnectionProblem     = "Ошибка соединения с базой данных redis"
+	RedisConnectionProblemCode = 501
+	RedisSetError              = "Ошибка записи в redis"
+	RedisSetErrorCode          = 510
+	RedisTTLNotExist           = "Не передана переменная окружения REDIS_TTL"
+	RedisTTLNotExistCode       = 520
+	RedisGetError              = "Ошибка получения из redis"
+	RedisGetErrorCode          = 530
+)
 
-var ErrHandler = &ErrorHandler{}
+const (
+	WsEmptyToken                   = "Не указан token"
+	WsEmptyTokenCode               = 101
+	WsCreateClientResponse         = "Ошибка при формировании ответа клиенту"
+	WsCreateClientResponseCode     = 102
+	WsUserIdentification           = "Ошибка при получении пользователя по токену"
+	WsUserIdentificationCode       = 103
+	WsUpgradeProblem               = "Ошибка обновления соединения"
+	WsUpgradeProblemCode           = 104
+	WsUniqueIdGenerateProblem      = "Ошибка генерации уникального идентификатора пользователя"
+	WsUniqueIdGenerateProblemCode  = 105
+	WsEventTypeNotExists           = "Вызываемое событие не поддерживается"
+	WsEventTypeNotExistsCode       = 106
+	WsChangeMessageStatusError     = "Ошибка при изменение статуса сообщения"
+	WsChangeMessageStatusErrorCode = 107
+	WsSendMessageError             = ">>> PANIC: Ошибка при отправке сообщения в web-socket"
+	WsSendMessageErrorCode         = 108
+	WsConnReadMessageError         = ">>> FATAL: Ошибка чтения сообщения"
+	WsConnReadMessageErrorCode     = 109
 
-type Error struct {
-	Error   error  `json:"sentry"`
-	Message string `json:"message"`
-	Code    int    `json:"code"`
-	Data    []byte `json:"data"`
-	Stack   string `json:"stack"`
-}
+	WsCreateAccountInvalidTypeErrorMessage = "Неверный тип аккаунта"
+	WsCreateAccountInvalidTypeErrorCode = 201
+	WsCreateAccountEmptyAccountErrorMessage = "Пустое значение наименование аккаунта"
+	WsCreateAccountEmptyAccountErrorCode = 202
 
-func E(ee error) *Error {
-	return &Error{Error: ee, Message: ee.Error()}
-}
 
-func MarshalError1011(err error, params []byte) *Error {
-	return &Error{
-		Error:   err,
-		Message: sdk.GetError(1011),
-		Code:    1011,
-		Data:    params,
-	}
-}
-
-func UnmarshalError1010(err error, params []byte) *Error {
-	return abstractError(&Error{
-		Error: err,
-		Data:  params,
-	}, 1010)
-}
-
-func UnmarshalRequestError1201(err error, params []byte) *Error {
-	return abstractError(&Error{
-		Error: err,
-		Data:  params,
-	}, 1201)
-}
-
-func UnmarshalRequestTypeError1204(err error, params []byte) *Error {
-	return abstractError(&Error{
-		Error: err,
-		Data:  params,
-	}, 1204)
-}
-
-func abstractError(err *Error, code int) *Error {
-	err.Message = sdk.GetError(code)
-	err.Code = code
-	return err
-}
-
-func (h *ErrorHandler) SetError(err *Error) {
-
-	if h.Sentry != nil {
-		h.Sentry.SetError(err)
-	} else {
-		log.Println("Tools.Error message:", err.Message, "Code:", err.Code, "Data:", string(err.Data))
-	}
-}
-
-func (h *ErrorHandler) SetPanic(f func()) {
-
-	if h.Sentry != nil {
-		h.Sentry.SetPanic(f)
-	} else {
-		defer func() {
-			if err := recover(); err != nil {
-				log.Println("Panic!!!!", err)
-			}
-		}()
-		f()
-	}
-}
-
-func (h *ErrorHandler) Close() {
-	if h.Sentry != nil {
-		h.Sentry.Close()
-	}
-}
+)

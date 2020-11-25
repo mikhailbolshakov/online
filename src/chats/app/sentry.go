@@ -1,9 +1,9 @@
-package system
+package app
 
 import (
+	"chats/system"
 	"fmt"
 	"github.com/getsentry/raven-go"
-	"log"
 	"os"
 	"strconv"
 	"time"
@@ -13,7 +13,7 @@ type Sentry struct {
 	Location *time.Location
 }
 
-type Options struct {
+type SentryOptions struct {
 	Protocol string
 	Login string
 	Password string
@@ -23,11 +23,11 @@ type Options struct {
 	ReconnectTime time.Duration
 }
 
-func (opt *Options) IsEnabled() bool {
+func (opt *SentryOptions) IsEnabled() bool {
 	return opt.Url != ""
 }
 
-func (opt *Options) DSN() string {
+func (opt *SentryOptions) DSN() string {
 	return fmt.Sprintf("%s://%s:%s@%s:%s/%s",
 		opt.Protocol,
 		opt.Login,
@@ -37,19 +37,19 @@ func (opt *Options) DSN() string {
 		opt.ProjectId)
 }
 
-func getFromEnv() *Options {
-	return &Options{
+func getFromEnv() *SentryOptions {
+	return &SentryOptions{
 		Protocol:  os.Getenv("SENTRY_PROTOCOL"),
 		Login:     os.Getenv("SENTRY_LOGIN"),
 		Password:  os.Getenv("SENTRY_PASSWORD"),
 		Url:       os.Getenv("SENTRY_URL"),
 		Port:      os.Getenv("SENTRY_PORT"),
 		ProjectId: os.Getenv("SENTRY_PROJECT_ID"),
-		ReconnectTime: ReconnectTime(),
+		ReconnectTime: reconnectTime(),
 	}
 }
 
-func InitSentry(options *Options) (*Sentry, error) {
+func InitSentry(options *SentryOptions) (*Sentry, error) {
 
 	opt := options
 
@@ -60,12 +60,12 @@ func InitSentry(options *Options) (*Sentry, error) {
 	if opt.IsEnabled() {
 		err := raven.SetDSN(opt.DSN())
 		if err != nil {
-			log.Println(err)
-			log.Println("reconnect after " + opt.ReconnectTime.String() + " seconds...")
+			L().Debug(err)
+			L().Debug("reconnect after " + opt.ReconnectTime.String() + " seconds...")
 			time.Sleep(opt.ReconnectTime)
 			return InitSentry(opt)
 		}
-		log.Println("Sentry connected.")
+		L().Debug("Sentry connected.")
 
 		loc, err := getLocation()
 		if err != nil {
@@ -76,7 +76,7 @@ func InitSentry(options *Options) (*Sentry, error) {
 			Location: loc,
 		}, nil
 	} else {
-		log.Println("Sentry disabled.")
+		L().Debug("Sentry disabled.")
 		return nil, nil
 	}
 
@@ -90,18 +90,18 @@ func getLocation() (*time.Location, error) {
 	return time.LoadLocation("Europe/Moscow")
 }
 
-func (s *Sentry) SetError(err *Error) {
+func (s *Sentry) SetError(err *system.Error) {
 	raven.CaptureError(err.Error, map[string]string{
 		"Message": err.Message,
 		"Code":    strconv.Itoa(err.Code),
 		"Data":    string(err.Data),
 	})
-	log.Println("Error message:", err.Message, "Code:", err.Code, "Data:", string(err.Data))
+	L().Debug("Error message:", err.Message, "Code:", err.Code, "Data:", string(err.Data))
 }
 
 func (s *Sentry) SetPanic(f func()) {
 	raven.CapturePanic(f, map[string]string{
-		"Message": ApplicationError,
-		"Code":    strconv.Itoa(ApplicationErrorCode),
+		"Message": system.GetError(system.ApplicationErrorCode),
+		"Code":    strconv.Itoa(system.ApplicationErrorCode),
 	})
 }

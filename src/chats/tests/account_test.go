@@ -143,7 +143,7 @@ func TestOnlineStatus_Success(t *testing.T) {
 //		t.Error(err.Error(), sdkService)
 //	}
 //
-//	accountId, err := helper.CreateAccountExt(sdkService, &sdk.Account{
+//	accountId, err := helper.CreateAccountExt(sdkService, &Account{
 //		Account:    "test",
 //		Type:       "",
 //		ExternalId: "111",

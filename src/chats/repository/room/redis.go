@@ -1,38 +1,38 @@
-package redis
+package room
 
 import (
-	"chats/models"
+	"chats/app"
 	"chats/system"
 	"encoding/json"
 	"github.com/go-redis/redis"
 	uuid "github.com/satori/go.uuid"
 )
 
-func (r *Redis) GetRoom(roomId uuid.UUID) (*models.Room, *system.Error) {
+func (r *Repository) redisGetRoom(roomId uuid.UUID) (*Room, *system.Error) {
 	uid := roomId.String()
 	key := "room:" + uid
-	val, err := r.Instance.Get(key).Bytes()
+	val, err := r.Redis.Instance.Get(key).Bytes()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
 		} else {
 			return nil, &system.Error{
 				Error:   err,
-				Message: RedisSetError,
-				Code:    RedisSetErrorCode,
+				Message: system.GetError(system.RedisSetErrorCode),
+				Code:    system.RedisSetErrorCode,
 				Data:    val,
 			}
 		}
 	}
 
-	room := &models.Room{}
+	room := &Room{}
 	err = json.Unmarshal(val, room)
 	if err != nil {
 		room.Id = uuid.Nil
 		return nil, &system.Error{
 			Error:   err,
-			Message: RedisSetError,
-			Code:    RedisSetErrorCode,
+			Message: system.GetError(system.RedisSetErrorCode),
+			Code:    system.RedisSetErrorCode,
 			Data:    val,
 		}
 	}
@@ -41,21 +41,21 @@ func (r *Redis) GetRoom(roomId uuid.UUID) (*models.Room, *system.Error) {
 
 }
 
-func (r *Redis) SetRoom(room *models.Room) *system.Error {
+func (r *Repository) redisSetRoom(room *Room) *system.Error {
 	uid := room.Id.String()
 	key := "room:" + uid
 
 	marshal, _ := json.Marshal(room)
 
-	setErr := r.Instance.Set(key, marshal, r.Ttl).Err()
+	setErr := r.Redis.Instance.Set(key, marshal, r.Redis.Ttl).Err()
 	if setErr != nil {
 		redisError := &system.Error{
 			Error:   setErr,
-			Message: RedisSetError,
-			Code:    RedisSetErrorCode,
+			Message: system.GetError(system.RedisSetErrorCode),
+			Code:    system.RedisSetErrorCode,
 			Data:    marshal,
 		}
-		system.ErrHandler.SetError(redisError)
+		app.E().SetError(redisError)
 
 		return redisError
 	}
@@ -63,11 +63,11 @@ func (r *Redis) SetRoom(room *models.Room) *system.Error {
 	return nil
 }
 
-func (r *Redis) DeleteRooms(roomIds []uuid.UUID) *system.Error {
+func (r *Repository) redisDeleteRooms(roomIds []uuid.UUID) *system.Error {
 	var keys []string
 	for _, r := range roomIds {
 		keys = append(keys,  "room:" + uuid.UUID.String(r))
 	}
-	r.Instance.Del(keys...)
+	r.Redis.Instance.Del(keys...)
 	return nil
 }

@@ -1,4 +1,4 @@
-package redis
+package app
 
 import (
 	"chats/system"
@@ -15,7 +15,7 @@ type Redis struct {
 	Ttl      time.Duration
 }
 
-func Init(attempt uint) *Redis {
+func InitRedis(attempt uint) *Redis {
 	client := redis.NewClient(&redis.Options{
 		Addr:     os.Getenv("REDIS_HOST") + ":" + os.Getenv("REDIS_PORT"),
 		Password: os.Getenv("REDIS_PASSWORD"),
@@ -23,23 +23,23 @@ func Init(attempt uint) *Redis {
 	})
 	_, err := client.Ping().Result()
 	if err != nil {
-		system.ErrHandler.SetError(&system.Error{
+		Instance.ErrorHandler.SetError(&system.Error{
 			Error:   err,
-			Message: RedisConnectionProblem + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
-			Code:    RedisConnectionProblemCode,
+			Message: system.RedisConnectionProblem + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
+			Code:    system.RedisConnectionProblemCode,
 		})
 
-		system.Reconnect(RedisConnectionProblem, &attempt)
+		Instance.Inf.Reconnect(system.RedisConnectionProblem, &attempt)
 
-		return Init(attempt)
+		return InitRedis(attempt)
 	}
 
 	ttl, err := strconv.ParseUint(os.Getenv("REDIS_TTL"), 10, 64)
 	if err != nil {
-		system.ErrHandler.SetError(&system.Error{
+		Instance.ErrorHandler.SetError(&system.Error{
 			Error:   err,
-			Message: RedisTTLNotExist,
-			Code:    RedisTTLNotExistCode,
+			Message: system.RedisTTLNotExist,
+			Code:    system.RedisTTLNotExistCode,
 		})
 		ttl = DEFAULT_TTL
 	}

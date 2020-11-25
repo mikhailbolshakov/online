@@ -1,11 +1,10 @@
 package server
 
 import (
+	"chats/app"
+	r "chats/repository/room"
 	"chats/system"
-	"chats/models"
-	"chats/sdk"
 	"encoding/json"
-	"fmt"
 	uuid "github.com/satori/go.uuid"
 	"time"
 )
@@ -15,20 +14,14 @@ const (
 	MessageTypeSendOnlineUsers = "sendOnlineUsers"
 )
 
-//	Deprecated
-func (ws *WsServer) cronManager() {
-	if system.Cron() {
-		go ws.userServiceMessageManager()
-		ws.consumer()
-	} else {
-		ws.provider()
-	}
-}
+
 
 func (ws *WsServer) consumer() {
-	errorChan := make(chan *sdk.Error, 2048)
-	go ws.hub.app.Sdk.
-		Subject(system.CronTopic()).
+	errorChan := make(chan *system.Error, 2048)
+
+	nats := app.GetNats()
+	go app.GetNats().
+		Subject(nats.CronTopic()).
 		CronConsumer(ws.cronMessagesHandler, errorChan)
 
 	ticker := time.NewTicker(time.Second * 5).C
@@ -42,14 +35,14 @@ func (ws *WsServer) consumer() {
 				defer ws.actualAccountsMutex.Unlock()
 				for userId, expiredTime := range ws.actualAccounts {
 					if now.After(expiredTime) {
-						fmt.Println(userId, "is offline") //	todo
+						app.L().Debug(userId, "is offline") //	todo
 						delete(ws.actualAccounts, userId)
 					}
 				}
 			}()
 
 		case err := <-errorChan:
-			system.ErrHandler.SetError(&system.Error{
+			app.E().SetError(&system.Error{
 				Error:   err.Error,
 				Message: err.Message,
 				Code:    err.Code,
@@ -69,9 +62,9 @@ func (ws *WsServer) provider() {
 			actualAccountIds = append(actualAccountIds, accountId)
 		}
 
-		cronMessage := &models.CronSendOnlineUsers{
+		cronMessage := &CronSendOnlineUsers{
 			Type: MessageTypeSendOnlineUsers,
-			Data: models.CronSendOnlineAccountsData{
+			Data: CronSendOnlineAccountsData{
 				Accounts: actualAccountIds,
 			},
 		}
@@ -80,17 +73,18 @@ func (ws *WsServer) provider() {
 		if err != nil {
 			system.MarshalError1011(err, nil)
 		} else {
-			go ws.hub.app.Sdk.
-				Subject(system.CronTopic()).
+			nats := app.GetNats()
+			go nats.
+				Subject(nats.CronTopic()).
 				Publish(request)
 		}
 	}
 }
 
-func (ws *WsServer) cronMessagesHandler(request []byte) ([]byte, *sdk.Error) {
+func (ws *WsServer) cronMessagesHandler(request []byte) ([]byte, *system.Error) {
 	data, err := ws.cronMessagesHandlerType(request)
 	if err != nil {
-		return nil, &sdk.Error{
+		return nil, &system.Error{
 			Error:   err.Error,
 			Message: err.Message,
 			Code:    err.Code,
@@ -102,7 +96,7 @@ func (ws *WsServer) cronMessagesHandler(request []byte) ([]byte, *sdk.Error) {
 }
 
 func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *system.Error) {
-	cronMessage := &models.CronMessage{}
+	cronMessage := &CronMessage{}
 
 	err := json.Unmarshal(data, cronMessage)
 	if err != nil {
@@ -111,13 +105,13 @@ func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *system.Error)
 
 	switch cronMessage.Type {
 	case MessageTypeGetUserStatus:
-		cronGetUserStatusRequest := &models.CronGetUserStatusRequest{}
+		cronGetUserStatusRequest := &CronGetUserStatusRequest{}
 		err := json.Unmarshal(data, cronGetUserStatusRequest)
 		if err != nil {
 			return nil, system.UnmarshalRequestError1201(err, data)
 		}
 
-		cronGetUserStatusResponse := &models.CronGetAccountStatusResponse{}
+		cronGetUserStatusResponse := &CronGetAccountStatusResponse{}
 
 		func() {
 			ws.actualAccountsMutex.Lock()
@@ -136,7 +130,7 @@ func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *system.Error)
 
 		return response, nil
 	case MessageTypeSendOnlineUsers:
-		cronSendOnlineUsers := &models.CronSendOnlineUsers{}
+		cronSendOnlineUsers := &CronSendOnlineUsers{}
 		err := json.Unmarshal(data, cronSendOnlineUsers)
 		if err != nil {
 			return nil, system.UnmarshalRequestError1201(err, data)
@@ -158,11 +152,13 @@ func (ws *WsServer) cronMessagesHandlerType(data []byte) ([]byte, *system.Error)
 }
 
 func (ws *WsServer) userServiceMessageManager() {
-	diff := system.CronStep()
+	diff := app.Instance.Env.CronStep()
 	diffTime := time.Now().Add(-diff)
 
+	rep := r.CreateRepository(app.GetDB())
+
 	for {
-		items := ws.hub.app.DB.RecdUsers(diffTime)
+		items := rep.RecdUsers(diffTime)
 
 		for _, item := range items {
 
@@ -171,7 +167,7 @@ func (ws *WsServer) userServiceMessageManager() {
 
 			/*
 			var title, text string
-			chat := ws.hub.app.DB.GetRoom(item.RoomId)
+			chat := app.GetDB().GetRoom(item.RoomId)
 
 			switch item.Role {
 			case database.UserTypeOperator:
@@ -185,17 +181,17 @@ func (ws *WsServer) userServiceMessageManager() {
 			}
 
 			if len(text) > 0 {
-				message := &sdk.ApiUserPushRequest{
-					Recipient: sdk.RecipientWithOrder{
+				message := &ApiUserPushRequest{
+					Recipient: RecipientWithOrder{
 						AccountId:         item.AccountId,
 						ConsultationId: 0,//chat.ReferenceId,
 					},
-					Message: sdk.ApiUserPushRequestMessage{
+					Message: ApiUserPushRequestMessage{
 						Title: title,
 						Body:  text,
 					},
 				}
-				ws.hub.app.Sdk.UserPush(message)
+				ws.hub.inf.Nats.UserPush(message)
 			}
 
 			 */

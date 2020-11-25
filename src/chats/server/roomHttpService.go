@@ -1,7 +1,6 @@
 package server
 
 import (
-	"chats/sdk"
 	"encoding/json"
 	"github.com/gorilla/mux"
 	uuid "github.com/satori/go.uuid"
@@ -41,7 +40,7 @@ func (s *RoomHttpService) setRouting(router *mux.Router) {
 
 func (s *RoomHttpService) Create(writer http.ResponseWriter, request *http.Request) {
 
-	rq := &sdk.CreateRoomRequest{}
+	rq := &CreateRoomRequest{}
 	decoder := json.NewDecoder(request.Body)
 	if err := decoder.Decode(rq); err != nil {
 		s.ws.httpServer.respondWithError(writer, http.StatusBadRequest, "Invalid request payload")
@@ -60,7 +59,7 @@ func (s *RoomHttpService) Create(writer http.ResponseWriter, request *http.Reque
 
 func (s *RoomHttpService) Subscribe(writer http.ResponseWriter, request *http.Request) {
 
-	rq := &sdk.RoomSubscribeRequest{}
+	rq := &RoomSubscribeRequest{}
 	decoder := json.NewDecoder(request.Body)
 	if err := decoder.Decode(rq); err != nil {
 		s.ws.httpServer.respondWithError(writer, http.StatusBadRequest, "Invalid request payload")
@@ -79,8 +78,8 @@ func (s *RoomHttpService) Subscribe(writer http.ResponseWriter, request *http.Re
 
 func (s *RoomHttpService) GetRooms(writer http.ResponseWriter, request *http.Request) {
 
-	rq := &sdk.GetRoomsByCriteriaRequest{
-		AccountId:       &sdk.AccountIdRequest{
+	rq := &GetRoomsByCriteriaRequest{
+		AccountId:       &AccountIdRequest{
 			ExternalId: request.FormValue("externalId"),
 		},
 		ReferenceId:     request.FormValue("referenceId"),
@@ -130,7 +129,7 @@ func (s *RoomHttpService) GetRooms(writer http.ResponseWriter, request *http.Req
 
 func (s *RoomHttpService) Close(writer http.ResponseWriter, request *http.Request) {
 
-	rq := &sdk.CloseRoomRequest{}
+	rq := &CloseRoomRequest{}
 	decoder := json.NewDecoder(request.Body)
 	if err := decoder.Decode(rq); err != nil {
 		s.ws.httpServer.respondWithError(writer, http.StatusBadRequest, "Invalid request payload")
@@ -149,12 +148,12 @@ func (s *RoomHttpService) Close(writer http.ResponseWriter, request *http.Reques
 
 func (s *RoomHttpService) GetMessageHistory(writer http.ResponseWriter, request *http.Request) {
 
-	rq := &sdk.GetMessageHistoryRequest{
-		PagingRequest: &sdk.PagingRequest{
-			SortBy: []sdk.SortRequest{},
+	rq := &GetMessageHistoryRequest{
+		PagingRequest: &PagingRequest{
+			SortBy: []SortRequest{},
 		},
-		Criteria:      &sdk.GetMessageHistoryCriteria{
-			AccountId:     sdk.AccountIdRequest{},
+		Criteria:      &GetMessageHistoryCriteria{
+			AccountId:     AccountIdRequest{},
 		},
 	}
 
@@ -278,7 +277,7 @@ func (s *RoomHttpService) GetMessageHistory(writer http.ResponseWriter, request 
 				s.ws.httpServer.respondWithError(writer, http.StatusBadRequest, "sort: incorrect format")
 				return
 			}
-			rq.PagingRequest.SortBy = append(rq.PagingRequest.SortBy, sdk.SortRequest{
+			rq.PagingRequest.SortBy = append(rq.PagingRequest.SortBy, SortRequest{
 				Field:     ops[0],
 				Direction: ops[1],
 			})

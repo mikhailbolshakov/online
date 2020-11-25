@@ -2,16 +2,15 @@ package server
 
 import (
 	"chats/proto"
-	"chats/sdk"
 	"chats/system"
 	uuid "github.com/satori/go.uuid"
 )
 
 type RoomConverter struct{}
 
-func (r *RoomConverter) CreateRequestFromProto(request *proto.CreateRoomRequest) (*sdk.CreateRoomRequest, *system.Error) {
-	result := &sdk.CreateRoomRequest{
-		Room: &sdk.RoomRequest{
+func (r *RoomConverter) CreateRequestFromProto(request *proto.CreateRoomRequest) (*CreateRoomRequest, *system.Error) {
+	result := &CreateRoomRequest{
+		Room: &RoomRequest{
 			ReferenceId: request.ReferenceId,
 			Chat:        request.Chat,
 			Video:       request.Video,
@@ -19,11 +18,11 @@ func (r *RoomConverter) CreateRequestFromProto(request *proto.CreateRoomRequest)
 		},
 	}
 
-	result.Room.Subscribers = []sdk.SubscriberRequest{}
+	result.Room.Subscribers = []SubscriberRequest{}
 
 	for _, item := range request.Subscribers {
-		result.Room.Subscribers = append(result.Room.Subscribers, sdk.SubscriberRequest{
-			Account: &sdk.AccountIdRequest{
+		result.Room.Subscribers = append(result.Room.Subscribers, SubscriberRequest{
+			Account: &AccountIdRequest{
 				AccountId:  item.Account.AccountId.ToUUID(),
 				ExternalId: item.Account.ExternalId,
 			},
@@ -34,7 +33,7 @@ func (r *RoomConverter) CreateRequestFromProto(request *proto.CreateRoomRequest)
 	return result, nil
 }
 
-func (r *RoomConverter) CreateResponseProtoFromModel(request *sdk.CreateRoomResponse) (*proto.CreateRoomResponse, *system.Error) {
+func (r *RoomConverter) CreateResponseProtoFromModel(request *CreateRoomResponse) (*proto.CreateRoomResponse, *system.Error) {
 	result := &proto.CreateRoomResponse{
 		Errors: []*proto.Error{},
 	}
@@ -46,22 +45,22 @@ func (r *RoomConverter) CreateResponseProtoFromModel(request *sdk.CreateRoomResp
 		}
 	}
 
-	result.Errors = proto.ErrorRs(request.Errors)
+	result.Errors = ProtoErrorFromErrorRs(request.Errors)
 
 	return result, nil
 }
 
-func (r *RoomConverter) SubscribeRequestFromProto(request *proto.RoomSubscribeRequest) (*sdk.RoomSubscribeRequest, *system.Error) {
+func (r *RoomConverter) SubscribeRequestFromProto(request *proto.RoomSubscribeRequest) (*RoomSubscribeRequest, *system.Error) {
 
-	result := &sdk.RoomSubscribeRequest{
+	result := &RoomSubscribeRequest{
 		RoomId:      request.RoomId.ToUUID(),
 		ReferenceId: request.ReferenceId,
-		Subscribers: []sdk.SubscriberRequest{},
+		Subscribers: []SubscriberRequest{},
 	}
 
 	for _, item := range request.Subscribers {
-		result.Subscribers = append(result.Subscribers, sdk.SubscriberRequest{
-			Account: &sdk.AccountIdRequest{
+		result.Subscribers = append(result.Subscribers, SubscriberRequest{
+			Account: &AccountIdRequest{
 				AccountId:  item.Account.AccountId.ToUUID(),
 				ExternalId: item.Account.ExternalId,
 			},
@@ -72,27 +71,27 @@ func (r *RoomConverter) SubscribeRequestFromProto(request *proto.RoomSubscribeRe
 	return result, nil
 }
 
-func (r *RoomConverter) SubscribeResponseProtoFromModel(request *sdk.RoomSubscribeResponse) (*proto.RoomSubscribeResponse, *system.Error) {
+func (r *RoomConverter) SubscribeResponseProtoFromModel(request *RoomSubscribeResponse) (*proto.RoomSubscribeResponse, *system.Error) {
 
 	result := &proto.RoomSubscribeResponse{
 		Errors: []*proto.Error{},
 	}
 
-	result.Errors = proto.ErrorRs(request.Errors)
+	result.Errors = ProtoErrorFromErrorRs(request.Errors)
 
 	return result, nil
 }
 
-func (r *RoomConverter) GetByCriteriaRequestFromProto(request *proto.GetRoomsByCriteriaRequest) (*sdk.GetRoomsByCriteriaRequest, *system.Error) {
-	result := &sdk.GetRoomsByCriteriaRequest{}
+func (r *RoomConverter) GetByCriteriaRequestFromProto(request *proto.GetRoomsByCriteriaRequest) (*GetRoomsByCriteriaRequest, *system.Error) {
+	result := &GetRoomsByCriteriaRequest{}
 
 	if request.AccountId != nil {
-		result.AccountId = &sdk.AccountIdRequest{
+		result.AccountId = &AccountIdRequest{
 			AccountId:  request.AccountId.AccountId.ToUUID(),
 			ExternalId: request.AccountId.ExternalId,
 		}
 	} else {
-		result.AccountId = &sdk.AccountIdRequest{}
+		result.AccountId = &AccountIdRequest{}
 	}
 
 	result.ReferenceId = request.ReferenceId
@@ -103,7 +102,7 @@ func (r *RoomConverter) GetByCriteriaRequestFromProto(request *proto.GetRoomsByC
 	return result, nil
 }
 
-func (r *RoomConverter) GetByCriteriaResponseProtoFromModel(request *sdk.GetRoomsByCriteriaResponse) (*proto.GetRoomsByCriteriaResponse, *system.Error) {
+func (r *RoomConverter) GetByCriteriaResponseProtoFromModel(request *GetRoomsByCriteriaResponse) (*proto.GetRoomsByCriteriaResponse, *system.Error) {
 
 	result := &proto.GetRoomsByCriteriaResponse{
 		Rooms: []*proto.GetRoomResponse{},
@@ -138,9 +137,9 @@ func (r *RoomConverter) GetByCriteriaResponseProtoFromModel(request *sdk.GetRoom
 
 }
 
-func (r *RoomConverter) CloseRoomRequestFromProto(request *proto.CloseRoomRequest) (*sdk.CloseRoomRequest, *system.Error) {
+func (r *RoomConverter) CloseRoomRequestFromProto(request *proto.CloseRoomRequest) (*CloseRoomRequest, *system.Error) {
 
-	result := &sdk.CloseRoomRequest{
+	result := &CloseRoomRequest{
 		RoomId:      request.RoomId.ToUUID(),
 		ReferenceId: request.ReferenceId,
 	}
@@ -148,10 +147,10 @@ func (r *RoomConverter) CloseRoomRequestFromProto(request *proto.CloseRoomReques
 	return result, nil
 }
 
-func (r *RoomConverter) CloseRoomResponseProtoFromModel(request *sdk.CloseRoomResponse) (*proto.CloseRoomResponse, *system.Error) {
+func (r *RoomConverter) CloseRoomResponseProtoFromModel(request *CloseRoomResponse) (*proto.CloseRoomResponse, *system.Error) {
 
 	result := &proto.CloseRoomResponse{
-		Errors: proto.ErrorRs(request.Errors),
+		Errors: ProtoErrorFromErrorRs(request.Errors),
 	}
 
 	return result, nil

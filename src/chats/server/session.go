@@ -1,14 +1,12 @@
 package server
 
 import (
-	"chats/models"
-	"chats/sdk"
+	"chats/app"
+	r "chats/repository/room"
 	"chats/system"
 	"fmt"
 	"github.com/gorilla/websocket"
 	uuid "github.com/satori/go.uuid"
-	"log"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -26,9 +24,10 @@ type Session struct {
 	sendChan        chan []byte
 	sessionId       uuid.UUID
 	rooms           map[uuid.UUID]*Room
-	subscribers     map[uuid.UUID]models.AccountSubscriber
+	// TODO: remove link to repository
+	subscribers     map[uuid.UUID]r.AccountSubscriber
 	subscribesMutex sync.Mutex
-	account         *sdk.Account
+	account         *Account
 }
 
 func InitSession(h *Hub, conn *websocket.Conn) *Session {
@@ -46,12 +45,7 @@ func (c *Session) send(message []byte) {
 			_, ok := r.(error)
 			if !ok {
 				err := fmt.Errorf("%v", r)
-				system.ErrHandler.SetError(&system.Error{
-					Error:   err,
-					Message: WsSendMessageError,
-					Code:    WsSendMessageErrorCode,
-					Data:    message,
-				})
+				app.E().SetError(system.SysErr(err, system.WsSendMessageErrorCode, message))
 			}
 		}
 	}()
@@ -72,7 +66,7 @@ func (c *Session) Write() {
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 
 			if !ok {
-				log.Println("Хаб закрыл канал", c.account.Id) //	TODO
+				app.L().Debug("Хаб закрыл канал", c.account.Id) //	TODO
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
@@ -82,7 +76,7 @@ func (c *Session) Write() {
 				return
 			}
 
-			log.Println("message to client: ", string(message)) //	TODO
+			app.L().Debug("message to client: ", string(message)) //	TODO
 
 			writer.Write(message)
 			if err := writer.Close(); err != nil {
@@ -99,7 +93,7 @@ func (c *Session) Write() {
 
 func (c *Session) Read() {
 	defer func() {
-		log.Println("Отключаем клиента", c.account.Id) //	TODO
+		app.L().Debug("Отключаем клиента", c.account.Id) //	TODO
 		c.hub.unregisterChan <- c
 		c.conn.Close()
 	}()
@@ -112,19 +106,14 @@ func (c *Session) Read() {
 	})
 
 	for {
-		messageType, message, err := c.conn.ReadMessage()
-		log.Printf("Message from socket: %v \n", string(message))
+		_, message, err := c.conn.ReadMessage()
+		app.L().Debugf("Message from socket: %v \n", string(message))
 
 		if err != nil {
-			system.ErrHandler.SetError(&system.Error{
-				Error:   err,
-				Message: WsConnReadMessageError + "; messageType: " + strconv.Itoa(messageType),
-				Code:    WsConnReadMessageErrorCode,
-				Data:    []byte(message),
-			})
-			log.Println(">>>>>> ReadMessageError:", err) //	TODO
+			app.E().SetError(system.SysErr(err, system.WsConnReadMessageErrorCode, message))
+			app.L().Debug(">>>>>> ReadMessageError:", err) //	TODO
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("> > > Read sentry: %v", err) 	 //	TODO
+				app.L().Debugf("> > > Read sentry: %v", err) 	 //	TODO
 			}
 			break
 		}
@@ -133,7 +122,7 @@ func (c *Session) Read() {
 	}
 }
 
-func (c *Session) SetSubscribers(data map[uuid.UUID]models.AccountSubscriber) {
+func (c *Session) SetSubscribers(data map[uuid.UUID]r.AccountSubscriber) {
 	c.subscribesMutex.Lock()
 	defer c.subscribesMutex.Unlock()
 	c.subscribers = data

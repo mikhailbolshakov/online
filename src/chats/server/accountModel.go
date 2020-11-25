@@ -1,4 +1,4 @@
-package sdk
+package server
 
 import uuid "github.com/satori/go.uuid"
 

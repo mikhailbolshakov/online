@@ -1,6 +1,7 @@
 package server
 
 import (
+	"chats/app"
 	"chats/system"
 	"fmt"
 	"log"
@@ -20,10 +21,10 @@ func (ws *WsServer) Grpc() {
 
 	registration(ws, ws.grpcServer)
 
-	log.Println("Listening GRPC....")
+	app.L().Debug("Listening GRPC....")
 	err = ws.grpcServer.Serve(lis)
 	if err != nil {
-		system.ErrHandler.SetError(&system.Error{
+		app.E().SetError(&system.Error{
 			Error: err,
 		})
 	}

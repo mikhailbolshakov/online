@@ -1,7 +1,6 @@
-package models
+package server
 
 import (
-	"chats/sdk"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -56,7 +55,7 @@ type WSChatMessageDataRequest struct {
 //	message response
 type WSChatMessagesDataResponse struct {
 	Messages []interface{} `json:"messages"`
-	Accounts []sdk.Account `json:"accounts"`
+	Accounts []Account     `json:"accounts"`
 }
 type WSChatMessagesDataMessageResponse struct {
 	Id              uuid.UUID         `json:"id"`
@@ -72,7 +71,7 @@ type WSChatMessagesDataMessageResponse struct {
 }
 type WSChatMessagesDataMessageFileResponse struct {
 	WSChatMessagesDataMessageResponse
-	File sdk.FileModel `json:"file"`
+	//File FileModel `json:"file"`
 }
 
 //	messageStatus request
@@ -112,8 +111,8 @@ type WSChatOpponentStatusResponse struct {
 	Data WSChatOpponentStatusDataResponse `json:"data"`
 }
 type WSChatOpponentStatusDataResponse struct {
-	RoomId   uuid.UUID            `json:"roomId"`
-	Accounts []AccountStatusModel `json:"accounts"`
+	RoomId   uuid.UUID              `json:"roomId"`
+	Accounts []WSAccountStatusModel `json:"accounts"`
 }
 
 //	join request without response
@@ -177,8 +176,8 @@ type WSSystemUserSubscribeRequest struct {
 	Message WSSystemUserSubscribeRequestMessage `json:"message"`
 }
 type WSSystemUserSubscribeRequestMessage struct {
-	Type string                                 `json:"type"`
-	Data sdk.RoomMessageAccountSubscribeRequest `json:"data"`
+	Type string                             `json:"type"`
+	Data RoomMessageAccountSubscribeRequest `json:"data"`
 }
 
 //system unsubscribe user
@@ -188,18 +187,18 @@ type WSSystemUserUnsubscribeRequest struct {
 }
 
 type WSSystemUserUnsubscribeRequestMessage struct {
-	Type string                                `json:"type"`
-	Data sdk.RoomMessageAccountUnsubscribeRequest `json:"data"`
+	Type string                               `json:"type"`
+	Data RoomMessageAccountUnsubscribeRequest `json:"data"`
 }
 
 //	other models
 
 type ExpandedAccountModel struct {
-	sdk.Account
+	Account
 	Role string `json:"role"`
 }
 
-type AccountStatusModel struct {
+type WSAccountStatusModel struct {
 	AccountId uuid.UUID `json:"accountId"`
 	Status    string    `json:"status"`
 }

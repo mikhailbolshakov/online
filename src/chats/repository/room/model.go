@@ -1,6 +1,7 @@
-package models
+package room
 
 import (
+	rep "chats/repository"
 	uuid "github.com/satori/go.uuid"
 	"time"
 )
@@ -12,7 +13,7 @@ type RoomSubscriber struct {
 	Role          string     `gorm:"column:role"`
 	SystemAccount uint8      `gorm:"column:system_account"`
 	UnsubscribeAt *time.Time `gorm:"column:unsubscribe_at"`
-	BaseModel
+	rep.BaseModel
 }
 
 type Room struct {
@@ -24,7 +25,7 @@ type Room struct {
 	Video       uint8      `gorm:"column:video"`
 	ClosedAt    *time.Time `gorm:"column:closed_at"`
 	Subscribers []RoomSubscriber
-	BaseModel
+	rep.BaseModel
 }
 
 type GetRoomCriteria struct {
@@ -58,7 +59,7 @@ type ChatMessage struct {
 	Message         string    `gorm:"column:message"`
 	FileId          string    `gorm:"column:file_id"`
 	Params          string    `gorm:"column:params"`
-	BaseModel
+	rep.BaseModel
 }
 
 type ChatMessageStatus struct {
@@ -67,7 +68,7 @@ type ChatMessageStatus struct {
 	SubscribeId uuid.UUID `gorm:"column:subscribe_id"`
 	AccountId   uuid.UUID `gorm:"column:account_id"`
 	Status      string    `gorm:"column:status" sql:"not null;type:ENUM('recd', 'read');default:'recd';"`
-	BaseModel
+	rep.BaseModel
 }
 
 type ChatMessageHistory struct {
@@ -87,22 +88,7 @@ type FirstMessage struct {
 	Id uuid.UUID `json:"id"`
 }
 
-type SortRequest struct {
-	Field string `json:"field"`
-	// ask | desc
-	Direction string `json:"direction"`
-}
 
-type PagingRequest struct {
-	Size   int
-	Index  int
-	SortBy []SortRequest
-}
-
-type PagingResponse struct {
-	Total int
-	Index int
-}
 
 type GetMessageHistoryCriteria struct {
 	AccountId         uuid.UUID

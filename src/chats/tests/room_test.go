@@ -228,11 +228,6 @@ func TestCreateRoomWithOneSubscriberAndSubscribeThen_Success(t *testing.T) {
 
 func TestFirstRoomClosedAfterSecondCreated_Success(t *testing.T) {
 
-	sdkService, err := helper.InitSdk()
-	if err != nil {
-		t.Error(err.Error(), sdkService)
-	}
-
 	conn, err := helper.GrpcConnection()
 	if err != nil {
 		t.Fatal(err.Error())

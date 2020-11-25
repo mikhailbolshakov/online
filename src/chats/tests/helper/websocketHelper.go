@@ -10,7 +10,7 @@ import (
 func AccountWebSocket(accountId uuid.UUID) (*websocket.Conn, chan []byte, error) {
 
 	header := http.Header{}
-	c, _, err := websocket.DefaultDialer.Dial(ws + accountId.String(), header)
+	c, _, err := websocket.DefaultDialer.Dial( "ws://localhost:8000/ws/?token=" + accountId.String(), header)
 	if err != nil {
 		return nil, nil, err
 	}

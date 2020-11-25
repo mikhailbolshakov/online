@@ -1,8 +1,10 @@
 package server
 
 import (
-	"chats/models"
-	"chats/sdk"
+	"chats/app"
+	a "chats/repository/account"
+	r "chats/repository/room"
+	"chats/repository"
 	"chats/system"
 	"fmt"
 	uuid "github.com/satori/go.uuid"
@@ -15,9 +17,9 @@ func (ws *WsServer) sendRoomSubscribeMessage(roomId uuid.UUID, accountId uuid.UU
 		SendPush:  false,
 		AccountId: uuid.Nil,
 		RoomId:    uuid.Nil,
-		Message: &models.WSChatResponse{
+		Message: &WSChatResponse{
 			Type: system.SystemMsgTypeUserSubscribe,
-			Data: &sdk.RoomMessageAccountSubscribeRequest{
+			Data: &RoomMessageAccountSubscribeRequest{
 				AccountId: accountId,
 				RoomId:    roomId,
 				Role:      role,
@@ -32,9 +34,9 @@ func (ws *WsServer) sendRoomUnsubscribeMessage(roomId uuid.UUID, accountId uuid.
 
 	//	subscribe websocket hub
 	roomMessage := &RoomMessage{
-		Message: &models.WSChatResponse{
+		Message: &WSChatResponse{
 			Type: system.SystemMsgTypeUserUnsubscribe,
-			Data: &sdk.RoomMessageAccountUnsubscribeRequest{
+			Data: &RoomMessageAccountUnsubscribeRequest{
 				AccountId: accountId,
 				RoomId:    roomId,
 			},
@@ -44,9 +46,12 @@ func (ws *WsServer) sendRoomUnsubscribeMessage(roomId uuid.UUID, accountId uuid.
 	ws.hub.SendMessageToRoom(roomMessage)
 }
 
-func (ws *WsServer) CreateRoom(request *sdk.CreateRoomRequest) (*sdk.CreateRoomResponse, *system.Error) {
+func (ws *WsServer) CreateRoom(request *CreateRoomRequest) (*CreateRoomResponse, *system.Error) {
 
-	roomModel := &models.Room{
+	accRep := a.CreateRepository(app.GetDB())
+	roomRep := r.CreateRepository(app.GetDB())
+
+	roomModel := &r.Room{
 		Id:          system.Uuid(),
 		ReferenceId: request.Room.ReferenceId,
 		// TODO: generate hash
@@ -54,14 +59,14 @@ func (ws *WsServer) CreateRoom(request *sdk.CreateRoomRequest) (*sdk.CreateRoomR
 		Audio:       system.BoolToUint8(request.Room.Audio),
 		Video:       system.BoolToUint8(request.Room.Video),
 		Chat:        system.BoolToUint8(request.Room.Chat),
-		Subscribers: []models.RoomSubscriber{},
+		Subscribers: []r.RoomSubscriber{},
 	}
 
 	var accountIds []uuid.UUID
 	for _, s := range request.Room.Subscribers {
 
 		// TODO: create a method GetAccounts([]accountId)
-		account, err := ws.hub.app.DB.GetAccount(s.Account.AccountId, s.Account.ExternalId)
+		account, err := accRep.GetAccount(s.Account.AccountId, s.Account.ExternalId)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +79,7 @@ func (ws *WsServer) CreateRoom(request *sdk.CreateRoomRequest) (*sdk.CreateRoomR
 			}
 		}
 
-		roomModel.Subscribers = append(roomModel.Subscribers, models.RoomSubscriber{
+		roomModel.Subscribers = append(roomModel.Subscribers, r.RoomSubscriber{
 			Id:            system.Uuid(),
 			RoomId:        roomModel.Id,
 			AccountId:     account.Id,
@@ -93,7 +98,7 @@ func (ws *WsServer) CreateRoom(request *sdk.CreateRoomRequest) (*sdk.CreateRoomR
 	}
 
 	// create a new open room
-	roomId, err := ws.hub.app.DB.CreateRoom(roomModel)
+	roomId, err := roomRep.CreateRoom(roomModel)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +107,12 @@ func (ws *WsServer) CreateRoom(request *sdk.CreateRoomRequest) (*sdk.CreateRoomR
 		go ws.sendRoomSubscribeMessage(roomId, s.AccountId, s.Role)
 	}
 
-	response := &sdk.CreateRoomResponse{
-		Result: &sdk.RoomResponse{
+	response := &CreateRoomResponse{
+		Result: &RoomResponse{
 			Id:   roomModel.Id,
 			Hash: roomModel.Hash,
 		},
-		Errors: []sdk.ErrorResponse{},
+		Errors: []ErrorResponse{},
 	}
 
 	return response, nil
@@ -116,7 +121,9 @@ func (ws *WsServer) CreateRoom(request *sdk.CreateRoomRequest) (*sdk.CreateRoomR
 
 func (ws *WsServer) CloseRoomsByAccounts(accountIds []uuid.UUID) *system.Error {
 
-	roomIds, err := ws.hub.app.DB.CloseRoomsByAccounts(accountIds)
+	roomRep := r.CreateRepository(app.GetDB())
+
+	roomIds, err := roomRep.CloseRoomsByAccounts(accountIds)
 	if err != nil {
 		return err
 	}
@@ -132,10 +139,12 @@ func (ws *WsServer) CloseRoomsByAccounts(accountIds []uuid.UUID) *system.Error {
 
 }
 
-func (ws *WsServer) CloseRoom(request *sdk.CloseRoomRequest) (*sdk.CloseRoomResponse, *system.Error) {
+func (ws *WsServer) CloseRoom(request *CloseRoomRequest) (*CloseRoomResponse, *system.Error) {
 
-	response := &sdk.CloseRoomResponse{
-		Errors: []sdk.ErrorResponse{},
+	roomRep := r.CreateRepository(app.GetDB())
+
+	response := &CloseRoomResponse{
+		Errors: []ErrorResponse{},
 	}
 
 	if request.ReferenceId == "" && request.RoomId == uuid.Nil {
@@ -145,13 +154,13 @@ func (ws *WsServer) CloseRoom(request *sdk.CloseRoomRequest) (*sdk.CloseRoomResp
 		}
 	}
 
-	rooms, err := ws.hub.app.DB.GetRooms(&models.GetRoomCriteria{ReferenceId: request.ReferenceId, RoomId: request.RoomId})
+	rooms, err := roomRep.GetRooms(&r.GetRoomCriteria{ReferenceId: request.ReferenceId, RoomId: request.RoomId})
 	if err != nil {
 		return nil, err
 	}
 
 	for _, room := range rooms {
-		err := ws.hub.app.DB.CloseRoom(room.Id)
+		err := roomRep.CloseRoom(room.Id)
 		if err != nil {
 			return nil, err
 		}
@@ -168,20 +177,23 @@ func (ws *WsServer) CloseRoom(request *sdk.CloseRoomRequest) (*sdk.CloseRoomResp
 
 }
 
-func (ws *WsServer) RoomSubscribe(request *sdk.RoomSubscribeRequest) (*sdk.RoomSubscribeResponse, *system.Error) {
+func (ws *WsServer) RoomSubscribe(request *RoomSubscribeRequest) (*RoomSubscribeResponse, *system.Error) {
+
+	roomRep := r.CreateRepository(app.GetDB())
+	accRep := a.CreateRepository(app.GetDB())
 
 	// get the room
-	var room = &models.Room{}
+	var room = &r.Room{}
 	var err = &system.Error{}
 	if request.RoomId != uuid.Nil {
 		// search bu Id if provided
-		room, err = ws.hub.app.DB.GetRoom(request.RoomId)
+		room, err = roomRep.GetRoom(request.RoomId)
 		if err != nil {
 			return nil, err
 		}
 	} else if request.ReferenceId != "" {
 		// search by Reference Id if provided
-		rs, err := ws.hub.app.DB.GetRooms(&models.GetRoomCriteria{ReferenceId: request.ReferenceId, WithSubscribers: true})
+		rs, err := roomRep.GetRooms(&r.GetRoomCriteria{ReferenceId: request.ReferenceId, WithSubscribers: true})
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +231,7 @@ func (ws *WsServer) RoomSubscribe(request *sdk.RoomSubscribeRequest) (*sdk.RoomS
 
 		// get account
 		// TODO: GetAccounts
-		account, err := ws.hub.app.DB.GetAccount(subscribeRq.Account.AccountId, subscribeRq.Account.ExternalId)
+		account, err := accRep.GetAccount(subscribeRq.Account.AccountId, subscribeRq.Account.ExternalId)
 
 		if err != nil {
 			return nil, err
@@ -245,7 +257,7 @@ func (ws *WsServer) RoomSubscribe(request *sdk.RoomSubscribeRequest) (*sdk.RoomS
 
 		if !accountFound {
 			// add subscriber to DB
-			subscriber := models.RoomSubscriber{
+			subscriber := r.RoomSubscriber{
 				Id:        system.Uuid(),
 				RoomId:    room.Id,
 				AccountId: account.Id,
@@ -255,7 +267,7 @@ func (ws *WsServer) RoomSubscribe(request *sdk.RoomSubscribeRequest) (*sdk.RoomS
 			}
 
 			room.Subscribers = append(room.Subscribers, subscriber)
-			_, err = ws.hub.app.DB.RoomSubscribeAccount(room, &subscriber)
+			_, err = roomRep.RoomSubscribeAccount(room, &subscriber)
 			if err != nil {
 				return nil, err
 			}
@@ -266,27 +278,30 @@ func (ws *WsServer) RoomSubscribe(request *sdk.RoomSubscribeRequest) (*sdk.RoomS
 
 	}
 
-	response := &sdk.RoomSubscribeResponse{
-		Errors: []sdk.ErrorResponse{},
+	response := &RoomSubscribeResponse{
+		Errors: []ErrorResponse{},
 	}
 
 	return response, nil
 }
 
-func (ws *WsServer) RoomUnsubscribe(request *sdk.RoomUnsubscribeRequest) (*sdk.RoomUnsubscribeResponse, *system.Error) {
+func (ws *WsServer) RoomUnsubscribe(request *RoomUnsubscribeRequest) (*RoomUnsubscribeResponse, *system.Error) {
+
+	roomRep := r.CreateRepository(app.GetDB())
+	accRep := a.CreateRepository(app.GetDB())
 
 	// get the room
-	var room = &models.Room{}
+	var room = &r.Room{}
 	var err = &system.Error{}
 	if request.RoomId != uuid.Nil {
 		// search bu Id if provided
-		room, err = ws.hub.app.DB.GetRoom(request.RoomId)
+		room, err = roomRep.GetRoom(request.RoomId)
 		if err != nil {
 			return nil, err
 		}
 	} else if request.ReferenceId != "" {
 		// search by Reference Id if provided
-		rs, err := ws.hub.app.DB.GetRooms(&models.GetRoomCriteria{ReferenceId: request.ReferenceId, WithSubscribers: true})
+		rs, err := roomRep.GetRooms(&r.GetRoomCriteria{ReferenceId: request.ReferenceId, WithSubscribers: true})
 		if err != nil {
 			return nil, err
 		}
@@ -317,7 +332,7 @@ func (ws *WsServer) RoomUnsubscribe(request *sdk.RoomUnsubscribeRequest) (*sdk.R
 		}
 	}
 
-	account, err := ws.hub.app.DB.GetAccount(request.AccountId.AccountId, request.AccountId.ExternalId)
+	account, err := accRep.GetAccount(request.AccountId.AccountId, request.AccountId.ExternalId)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +346,7 @@ func (ws *WsServer) RoomUnsubscribe(request *sdk.RoomUnsubscribeRequest) (*sdk.R
 
 			accountFound = true
 
-			err := ws.hub.app.DB.RoomUnsubscribeAccount(room.Id, account.Id)
+			err := roomRep.RoomUnsubscribeAccount(room.Id, account.Id)
 			if err != nil {
 				return nil, err
 			}
@@ -349,17 +364,19 @@ func (ws *WsServer) RoomUnsubscribe(request *sdk.RoomUnsubscribeRequest) (*sdk.R
 		}
 	}
 
-	response := &sdk.RoomUnsubscribeResponse{
-		Errors: []sdk.ErrorResponse{},
+	response := &RoomUnsubscribeResponse{
+		Errors: []ErrorResponse{},
 	}
 
 	return response, nil
 
 }
 
-func (ws *WsServer) GetRoomsByCriteria(request *sdk.GetRoomsByCriteriaRequest) (*sdk.GetRoomsByCriteriaResponse, *system.Error) {
+func (ws *WsServer) GetRoomsByCriteria(request *GetRoomsByCriteriaRequest) (*GetRoomsByCriteriaResponse, *system.Error) {
 
-	criteriaModel := &models.GetRoomCriteria{
+	roomRep := r.CreateRepository(app.GetDB())
+
+	criteriaModel := &r.GetRoomCriteria{
 		AccountId:         request.AccountId.AccountId,
 		ExternalAccountId: request.AccountId.ExternalId,
 		ReferenceId:       request.ReferenceId,
@@ -368,19 +385,19 @@ func (ws *WsServer) GetRoomsByCriteria(request *sdk.GetRoomsByCriteriaRequest) (
 		WithSubscribers:   request.WithSubscribers,
 	}
 
-	result, err := ws.hub.app.DB.GetRooms(criteriaModel)
+	result, err := roomRep.GetRooms(criteriaModel)
 	if err != nil {
 		return nil, err
 	}
 
-	response := &sdk.GetRoomsByCriteriaResponse{
-		Rooms:  []sdk.GetRoomResponse{},
-		Errors: []sdk.ErrorResponse{},
+	response := &GetRoomsByCriteriaResponse{
+		Rooms:  []GetRoomResponse{},
+		Errors: []ErrorResponse{},
 	}
 
 	for _, item := range result {
 
-		room := sdk.GetRoomResponse{
+		room := GetRoomResponse{
 			Id:          item.Id,
 			Hash:        item.Hash,
 			ReferenceId: item.ReferenceId,
@@ -388,11 +405,11 @@ func (ws *WsServer) GetRoomsByCriteria(request *sdk.GetRoomsByCriteriaRequest) (
 			Video:       system.Uint8ToBool(item.Video),
 			Audio:       system.Uint8ToBool(item.Audio),
 			ClosedAt:    item.ClosedAt,
-			Subscribers: []sdk.GetSubscriberResponse{},
+			Subscribers: []GetSubscriberResponse{},
 		}
 		if request.WithSubscribers {
 			for _, s := range item.Subscribers {
-				room.Subscribers = append(room.Subscribers, sdk.GetSubscriberResponse{
+				room.Subscribers = append(room.Subscribers, GetSubscriberResponse{
 					Id:            s.Id,
 					AccountId:     s.AccountId,
 					Role:          s.Role,
@@ -408,7 +425,9 @@ func (ws *WsServer) GetRoomsByCriteria(request *sdk.GetRoomsByCriteriaRequest) (
 
 }
 
-func (ws *WsServer) GetMessageHistory(request *sdk.GetMessageHistoryRequest) (*sdk.GetMessageHistoryResponse, *system.Error) {
+func (ws *WsServer) GetMessageHistory(request *GetMessageHistoryRequest) (*GetMessageHistoryResponse, *system.Error) {
+
+	roomRep := r.CreateRepository(app.GetDB())
 
 	if request.Criteria.AccountId.AccountId == uuid.Nil &&
 		request.Criteria.AccountId.ExternalId == "" &&
@@ -421,7 +440,7 @@ func (ws *WsServer) GetMessageHistory(request *sdk.GetMessageHistoryRequest) (*s
 	}
 
 	criteria := request.Criteria
-	criteriaModel := &models.GetMessageHistoryCriteria{
+	criteriaModel := &r.GetMessageHistoryCriteria{
 		AccountId:         criteria.AccountId.AccountId,
 		AccountExternalId: criteria.AccountId.ExternalId,
 		ReferenceId:       criteria.ReferenceId,
@@ -435,15 +454,15 @@ func (ws *WsServer) GetMessageHistory(request *sdk.GetMessageHistoryRequest) (*s
 		WithAccounts:      criteria.WithAccounts,
 	}
 
-	var pagingRqModel = &models.PagingRequest{
-		SortBy: []models.SortRequest{},
+	var pagingRqModel = &repository.PagingRequest{
+		SortBy: []repository.SortRequest{},
 	}
 	if request.PagingRequest != nil {
 		pagingRqModel.Index = request.PagingRequest.Index
 		pagingRqModel.Size = request.PagingRequest.Size
 
 		for _, s := range request.PagingRequest.SortBy {
-			pagingRqModel.SortBy = append(pagingRqModel.SortBy, models.SortRequest{
+			pagingRqModel.SortBy = append(pagingRqModel.SortBy, repository.SortRequest{
 				Field:     s.Field,
 				Direction: s.Direction,
 			})
@@ -459,20 +478,20 @@ func (ws *WsServer) GetMessageHistory(request *sdk.GetMessageHistoryRequest) (*s
 		pagingRqModel.Size = 100
 	}
 
-	items, pagingRs, accountsRs, err := ws.hub.app.DB.GetMessageHistory(criteriaModel, pagingRqModel)
+	items, pagingRs, accountsRs, err := roomRep.GetMessageHistory(criteriaModel, pagingRqModel)
 	if err != nil {
 		return nil, err
 	}
 
-	response := &sdk.GetMessageHistoryResponse{
-		Messages: []sdk.MessageHistoryItem{},
-		Accounts: []sdk.MessageAccount{},
-		Paging:   &sdk.PagingResponse{},
-		Errors:   []sdk.ErrorResponse{},
+	response := &GetMessageHistoryResponse{
+		Messages: []MessageHistoryItem{},
+		Accounts: []MessageAccount{},
+		Paging:   &PagingResponse{},
+		Errors:   []ErrorResponse{},
 	}
 
 	for _, item := range items {
-		message := sdk.MessageHistoryItem{
+		message := MessageHistoryItem{
 			Id:               item.Id,
 			ClientMessageId:  item.ClientMessageId,
 			ReferenceId:      item.ReferenceId,
@@ -483,11 +502,11 @@ func (ws *WsServer) GetMessageHistory(request *sdk.GetMessageHistoryRequest) (*s
 			Params:           item.Params,
 			SenderAccountId:  item.SenderAccountId,
 			SenderExternalId: item.SenderExternalId,
-			Statuses:         []sdk.MessageStatus{},
+			Statuses:         []MessageStatus{},
 		}
 
 		for _, s := range item.Statuses {
-			message.Statuses = append(message.Statuses, sdk.MessageStatus{
+			message.Statuses = append(message.Statuses, MessageStatus{
 				AccountId:  s.AccountId,
 				Status:     s.Status,
 				StatusDate: s.StatusDate,
@@ -498,7 +517,7 @@ func (ws *WsServer) GetMessageHistory(request *sdk.GetMessageHistoryRequest) (*s
 	}
 
 	for _, a := range accountsRs {
-		response.Accounts = append(response.Accounts, sdk.MessageAccount{
+		response.Accounts = append(response.Accounts, MessageAccount{
 			Id:         a.Id,
 			Type:       a.Type,
 			Status:     a.Status,

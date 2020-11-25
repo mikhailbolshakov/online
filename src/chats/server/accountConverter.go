@@ -1,21 +1,20 @@
 package server
 
 import (
-	"chats/models"
 	"chats/proto"
-	"chats/sdk"
 	"chats/system"
 	uuid "github.com/satori/go.uuid"
+	a "chats/repository/account"
 )
 
 type AccountConverter struct{}
 
-func ConvertAccountFromModel(model *models.Account) *sdk.Account {
+func ConvertAccountFromModel(model *a.Account) *Account {
 	if model == nil || model.Id == uuid.Nil {
-		return &sdk.Account{}
+		return &Account{}
 	}
 
-	return &sdk.Account{
+	return &Account{
 		Id:         model.Id,
 		Account:    model.Account,
 		Type:       model.Type,
@@ -29,28 +28,9 @@ func ConvertAccountFromModel(model *models.Account) *sdk.Account {
 	}
 }
 
-func ConvertAccountFromExpandedAccountModel(model *models.ExpandedAccountModel) *sdk.Account {
-	if model == nil || model.Id == uuid.Nil {
-		return &sdk.Account{}
-	}
+func (r *AccountConverter) CreateRequestFromProto(request *proto.CreatAccountRequest) (*CreateAccountRequest, *system.Error) {
 
-	return &sdk.Account{
-		Id:         model.Account.Id,
-		Account:    model.Account.Account,
-		Type:       model.Account.Type,
-		ExternalId: model.Account.ExternalId,
-		FirstName:  model.Account.FirstName,
-		MiddleName: model.Account.MiddleName,
-		LastName:   model.Account.LastName,
-		Email:      model.Account.Email,
-		Phone:      model.Account.Phone,
-		AvatarUrl:  model.Account.AvatarUrl,
-	}
-}
-
-func (r *AccountConverter) CreateRequestFromProto(request *proto.CreatAccountRequest) (*sdk.CreateAccountRequest, *system.Error) {
-
-	result := &sdk.CreateAccountRequest{
+	result := &CreateAccountRequest{
 		Account:    request.Account,
 		Type:       request.Type,
 		ExternalId: request.ExternalId,
@@ -65,22 +45,22 @@ func (r *AccountConverter) CreateRequestFromProto(request *proto.CreatAccountReq
 	return result, nil
 }
 
-func (r *AccountConverter) CreateResponseProtoFromModel(request *sdk.CreateAccountResponse) (*proto.CreateAccountResponse, *system.Error) {
+func (r *AccountConverter) CreateResponseProtoFromModel(request *CreateAccountResponse) (*proto.CreateAccountResponse, *system.Error) {
 
 	result := &proto.CreateAccountResponse{
 		Account: &proto.AccountResponse{
 			Id: proto.FromUUID(request.AccountId),
 		},
-		Errors: proto.ErrorRs(request.Errors),
+		Errors: ProtoErrorFromErrorRs(request.Errors),
 	}
 
 	return result, nil
 }
 
-func (r *AccountConverter) UpdateRequestFromProto(request *proto.UpdateAccountRequest) (*sdk.UpdateAccountRequest, *system.Error) {
+func (r *AccountConverter) UpdateRequestFromProto(request *proto.UpdateAccountRequest) (*UpdateAccountRequest, *system.Error) {
 
-	result := &sdk.UpdateAccountRequest{
-		AccountId: sdk.AccountIdRequest{
+	result := &UpdateAccountRequest{
+		AccountId: AccountIdRequest{
 			AccountId:  request.AccountId.AccountId.ToUUID(),
 			ExternalId: request.AccountId.ExternalId,
 		},
@@ -95,19 +75,19 @@ func (r *AccountConverter) UpdateRequestFromProto(request *proto.UpdateAccountRe
 	return result, nil
 }
 
-func (r *AccountConverter) UpdateResponseProtoFromModel(request *sdk.UpdateAccountResponse) (*proto.UpdateAccountResponse, *system.Error) {
+func (r *AccountConverter) UpdateResponseProtoFromModel(request *UpdateAccountResponse) (*proto.UpdateAccountResponse, *system.Error) {
 
 	result := &proto.UpdateAccountResponse{
-		Errors: proto.ErrorRs(request.Errors),
+		Errors: ProtoErrorFromErrorRs(request.Errors),
 	}
 
 	return result, nil
 }
 
-func (r *AccountConverter) GetByCriteriaRequestFromProto(request *proto.GetAccountsByCriteriaRequest) (*sdk.GetAccountsByCriteriaRequest, *system.Error) {
+func (r *AccountConverter) GetByCriteriaRequestFromProto(request *proto.GetAccountsByCriteriaRequest) (*GetAccountsByCriteriaRequest, *system.Error) {
 
-	result := &sdk.GetAccountsByCriteriaRequest{
-		AccountId: sdk.AccountIdRequest{
+	result := &GetAccountsByCriteriaRequest{
+		AccountId: AccountIdRequest{
 			AccountId:  request.AccountId.AccountId.ToUUID(),
 			ExternalId: request.AccountId.ExternalId,
 		},
@@ -118,11 +98,11 @@ func (r *AccountConverter) GetByCriteriaRequestFromProto(request *proto.GetAccou
 	return result, nil
 }
 
-func (r *AccountConverter) GetByCriteriaResponseProtoFromModel(request *sdk.GetAccountsByCriteriaResponse) (*proto.GetAccountsByCriteriaResponse, *system.Error) {
+func (r *AccountConverter) GetByCriteriaResponseProtoFromModel(request *GetAccountsByCriteriaResponse) (*proto.GetAccountsByCriteriaResponse, *system.Error) {
 
 	result := &proto.GetAccountsByCriteriaResponse{
 		Accounts: []*proto.AccountItem{},
-		Errors:   proto.ErrorRs(request.Errors),
+		Errors:   ProtoErrorFromErrorRs(request.Errors),
 	}
 
 	for _, i := range request.Accounts {
@@ -143,10 +123,10 @@ func (r *AccountConverter) GetByCriteriaResponseProtoFromModel(request *sdk.GetA
 	return result, nil
 }
 
-func (r *AccountConverter) SetOnlineStatusRequestFromProto(request *proto.SetOnlineStatusRequest) (*sdk.SetAccountOnlineStatusRequest, *system.Error) {
+func (r *AccountConverter) SetOnlineStatusRequestFromProto(request *proto.SetOnlineStatusRequest) (*SetAccountOnlineStatusRequest, *system.Error) {
 
-	result := &sdk.SetAccountOnlineStatusRequest{
-		Account: &sdk.AccountIdRequest{
+	result := &SetAccountOnlineStatusRequest{
+		Account: &AccountIdRequest{
 			AccountId:  request.AccountId.AccountId.ToUUID(),
 			ExternalId: request.AccountId.ExternalId,
 		},
@@ -156,19 +136,19 @@ func (r *AccountConverter) SetOnlineStatusRequestFromProto(request *proto.SetOnl
 	return result, nil
 }
 
-func (r *AccountConverter) SetOnlineStatusResponseProtoFromModel(request *sdk.SetAccountOnlineStatusResponse) (*proto.SetOnlineStatusResponse, *system.Error) {
+func (r *AccountConverter) SetOnlineStatusResponseProtoFromModel(request *SetAccountOnlineStatusResponse) (*proto.SetOnlineStatusResponse, *system.Error) {
 
 	result := &proto.SetOnlineStatusResponse{
-		Errors: proto.ErrorRs(request.Errors),
+		Errors: ProtoErrorFromErrorRs(request.Errors),
 	}
 
 	return result, nil
 }
 
-func (r *AccountConverter) GetOnlineStatusRequestFromProto(request *proto.GetOnlineStatusRequest) (*sdk.GetAccountOnlineStatusRequest, *system.Error) {
+func (r *AccountConverter) GetOnlineStatusRequestFromProto(request *proto.GetOnlineStatusRequest) (*GetAccountOnlineStatusRequest, *system.Error) {
 
-	result := &sdk.GetAccountOnlineStatusRequest{
-		Account: &sdk.AccountIdRequest{
+	result := &GetAccountOnlineStatusRequest{
+		Account: &AccountIdRequest{
 			AccountId:  request.AccountId.AccountId.ToUUID(),
 			ExternalId: request.AccountId.ExternalId,
 		},
@@ -177,11 +157,11 @@ func (r *AccountConverter) GetOnlineStatusRequestFromProto(request *proto.GetOnl
 	return result, nil
 }
 
-func (r *AccountConverter) GetOnlineStatusResponseProtoFromModel(request *sdk.GetAccountOnlineStatusResponse) (*proto.GetOnlineStatusResponse, *system.Error) {
+func (r *AccountConverter) GetOnlineStatusResponseProtoFromModel(request *GetAccountOnlineStatusResponse) (*proto.GetOnlineStatusResponse, *system.Error) {
 
 	result := &proto.GetOnlineStatusResponse{
 		Status: request.Status,
-		Errors: proto.ErrorRs(request.Errors),
+		Errors: ProtoErrorFromErrorRs(request.Errors),
 	}
 
 	return result, nil

@@ -1,15 +1,28 @@
-package database
+package account
 
 import (
-	"chats/models"
+	"chats/app"
 	"chats/system"
 	uuid "github.com/satori/go.uuid"
+	rep "chats/repository"
 	"time"
 )
 
-func (s *Storage) CreateAccount(accountModel *models.Account) (uuid.UUID, *system.Error) {
+type Repository struct {
+	Storage *app.Storage
+	Redis *app.Redis
+}
 
-	result := s.Instance.Create(accountModel)
+func CreateRepository(storage *app.Storage) *Repository {
+	return &Repository{
+		Storage: storage,
+		Redis:   storage.Redis,
+	}
+}
+
+func (s *Repository) CreateAccount(accountModel *Account) (uuid.UUID, *system.Error) {
+
+	result := s.Storage.Instance.Create(accountModel)
 
 	if result.Error != nil {
 		return uuid.Nil, &system.Error{Error: result.Error}
@@ -18,19 +31,19 @@ func (s *Storage) CreateAccount(accountModel *models.Account) (uuid.UUID, *syste
 	return accountModel.Id, nil
 }
 
-func (s *Storage) UpdateAccount(accountModel *models.Account) *system.Error {
+func (s *Repository) UpdateAccount(accountModel *Account) *system.Error {
 
-	result := s.Instance.
-		Model(&models.Account{}).
+	result := s.Storage.Instance.
+		Model(&Account{}).
 		Where("id = ?::uuid", accountModel.Id).
-		Updates(&models.Account{
+		Updates(&Account{
 			FirstName:  accountModel.FirstName,
 			MiddleName: accountModel.MiddleName,
 			LastName:   accountModel.LastName,
 			Email:      accountModel.Email,
 			Phone:      accountModel.Phone,
 			AvatarUrl:  accountModel.AvatarUrl,
-			BaseModel: models.BaseModel{
+			BaseModel: rep.BaseModel{
 				UpdatedAt: time.Now(),
 			},
 		})
@@ -39,14 +52,14 @@ func (s *Storage) UpdateAccount(accountModel *models.Account) *system.Error {
 		return &system.Error{Error: result.Error}
 	}
 
-	s.Redis.DeleteAccounts([]uuid.UUID{accountModel.Id}, []string{accountModel.ExternalId})
+	s.redisDeleteAccounts([]uuid.UUID{accountModel.Id}, []string{accountModel.ExternalId})
 
 	return nil
 }
 
-func (s *Storage) CreateOnlineStatus(onlineStatusModel *models.OnlineStatus) (uuid.UUID, *system.Error) {
+func (s *Repository) CreateOnlineStatus(onlineStatusModel *OnlineStatus) (uuid.UUID, *system.Error) {
 
-	result := s.Instance.Create(onlineStatusModel)
+	result := s.Storage.Instance.Create(onlineStatusModel)
 
 	if result.Error != nil {
 		return uuid.Nil, &system.Error{Error: result.Error}
@@ -55,34 +68,34 @@ func (s *Storage) CreateOnlineStatus(onlineStatusModel *models.OnlineStatus) (uu
 	return onlineStatusModel.Id, nil
 }
 
-func (s *Storage) UpdateOnlineStatus(accountId uuid.UUID, status string) *system.Error {
+func (s *Repository) UpdateOnlineStatus(accountId uuid.UUID, status string) *system.Error {
 
-	err := s.Redis.SetAccountOnlineStatus(accountId, status)
+	err := s.redisSetAccountOnlineStatus(accountId, status)
 	if err != nil {
 		return err
 	}
 
 	// update DB async
 	go func() {
-		err := s.Instance.
-			Model(&models.OnlineStatus{}).
+		err := s.Storage.Instance.
+			Model(&OnlineStatus{}).
 			Where("account_id = ?::uuid", accountId).
-			Updates(&models.OnlineStatus{
+			Updates(&OnlineStatus{
 				Status: status,
-				BaseModel: models.BaseModel{
+				BaseModel: rep.BaseModel{
 					UpdatedAt: time.Now(),
 				},
 			}).Error
-		system.ErrHandler.SetError(system.E(err))
+		app.E().SetError(system.E(err))
 	}()
 
 	return nil
 
 }
 
-func (s *Storage) GetOnlineStatus(accountId uuid.UUID) (string, *system.Error) {
+func (s *Repository) GetOnlineStatus(accountId uuid.UUID) (string, *system.Error) {
 
-	status, err := s.Redis.GetAccountOnlineStatus(accountId)
+	status, err := s.redisGetAccountOnlineStatus(accountId)
 	if err != nil {
 		return "", err
 	}
@@ -91,8 +104,8 @@ func (s *Storage) GetOnlineStatus(accountId uuid.UUID) (string, *system.Error) {
 		return status, nil
 	}
 
-	model := &models.OnlineStatus{}
-	e := s.Instance.
+	model := &OnlineStatus{}
+	e := s.Storage.Instance.
 		Where("account_id = ?::uuid", accountId).
 		First(model).
 		Error
@@ -101,14 +114,14 @@ func (s *Storage) GetOnlineStatus(accountId uuid.UUID) (string, *system.Error) {
 	}
 
 	if model.Id != uuid.Nil {
-		s.Redis.SetAccountOnlineStatus(model.AccountId, model.Status)
+		s.redisSetAccountOnlineStatus(model.AccountId, model.Status)
 		return model.Status, nil
 	}
 	return "", nil
 
 }
 
-func (s *Storage) GetAccount(accountId uuid.UUID, externalId string) (*models.Account, *system.Error) {
+func (s *Repository) GetAccount(accountId uuid.UUID, externalId string) (*Account, *system.Error) {
 
 	if accountId == uuid.Nil && externalId == "" {
 		return nil, &system.Error{
@@ -119,7 +132,7 @@ func (s *Storage) GetAccount(accountId uuid.UUID, externalId string) (*models.Ac
 
 	if accountId != uuid.Nil {
 
-		account, err := s.Redis.GetAccountModelById(accountId)
+		account, err := s.redisGetAccountModelById(accountId)
 		if err != nil {
 			return nil, err
 		}
@@ -128,18 +141,18 @@ func (s *Storage) GetAccount(accountId uuid.UUID, externalId string) (*models.Ac
 			return account, nil
 		}
 
-		accountModel := &models.Account{}
-		s.Instance.First(accountModel, "id = ?::uuid", accountId)
+		accountModel := &Account{}
+		s.Storage.Instance.First(accountModel, "id = ?::uuid", accountId)
 
 		if accountModel.Id != uuid.Nil {
-			s.Redis.SetAccount(accountModel)
+			s.redisSetAccount(accountModel)
 		}
 		return accountModel, nil
 	}
 
 	if externalId != "" {
 
-		account, err := s.Redis.GetAccountModelByExternalId(externalId)
+		account, err := s.redisGetAccountModelByExternalId(externalId)
 		if err != nil {
 			return nil, err
 		}
@@ -148,10 +161,10 @@ func (s *Storage) GetAccount(accountId uuid.UUID, externalId string) (*models.Ac
 			return account, nil
 		}
 
-		accountModel := &models.Account{}
-		s.Instance.Where("external_id = ?", externalId).First(accountModel)
+		accountModel := &Account{}
+		s.Storage.Instance.Where("external_id = ?", externalId).First(accountModel)
 		if accountModel.Id != uuid.Nil {
-			s.Redis.SetAccount(accountModel)
+			s.redisSetAccount(accountModel)
 		}
 		return accountModel, nil
 	}
@@ -159,7 +172,7 @@ func (s *Storage) GetAccount(accountId uuid.UUID, externalId string) (*models.Ac
 	return nil, nil
 }
 
-func (s *Storage) GetAccountsByCriteria(critera *models.GetAccountsCriteria) ([]models.Account, *system.Error) {
+func (s *Repository) GetAccountsByCriteria(critera *GetAccountsCriteria) ([]Account, *system.Error) {
 
 	if critera.ExternalId == "" && critera.AccountId == uuid.Nil && critera.Email == "" && critera.Phone == "" {
 		return nil, &system.Error{
@@ -174,7 +187,7 @@ func (s *Storage) GetAccountsByCriteria(critera *models.GetAccountsCriteria) ([]
 			return nil, err
 		}
 
-		var result []models.Account
+		var result []Account
 		if account != nil {
 			result = append(result, *account)
 		}
@@ -183,7 +196,7 @@ func (s *Storage) GetAccountsByCriteria(critera *models.GetAccountsCriteria) ([]
 
 	}
 
-	q := s.Instance.Model(&models.Account{})
+	q := s.Storage.Instance.Model(&Account{})
 	if critera.Phone != "" {
 		q = q.Where("phone = ?", critera.Phone)
 	}
@@ -200,10 +213,10 @@ func (s *Storage) GetAccountsByCriteria(critera *models.GetAccountsCriteria) ([]
 		}
 	}
 
-	var result []models.Account
+	var result []Account
 	for rows.Next() {
-		account := &models.Account{}
-		err := s.Instance.ScanRows(rows, account)
+		account := &Account{}
+		err := s.Storage.Instance.ScanRows(rows, account)
 		if err != nil {
 			return nil, &system.Error{
 				Error:   err,

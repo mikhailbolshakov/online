@@ -1,7 +1,7 @@
 package proto
 
 import (
-	"chats/sdk"
+	"chats/app"
 	"chats/system"
 	uuid "github.com/satori/go.uuid"
 	"time"
@@ -14,7 +14,7 @@ func (u *UUID) ToUUID() uuid.UUID {
 	} else {
 		value, err := uuid.FromString(u.Value)
 		if err != nil {
-			system.ErrHandler.SetError(&system.Error{
+			app.E().SetError(&system.Error{
 				Message: "UUID convertion error",
 				Error:   err,
 			})
@@ -46,17 +46,4 @@ func Err(e *system.Error) *Error {
 		Code:    int32(e.Code),
 		Message: e.Message,
 	}
-}
-
-func ErrorRs(source []sdk.ErrorResponse) []*Error {
-	var result []*Error
-	if len(source) > 0 {
-		for _, e := range source {
-			result = append(result, &Error{
-				Code:    int32(e.Code),
-				Message: e.Message,
-			})
-		}
-	}
-	return result
 }

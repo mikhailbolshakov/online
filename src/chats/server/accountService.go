@@ -1,8 +1,8 @@
 package server
 
 import (
-	"chats/models"
-	"chats/sdk"
+	"chats/app"
+	a "chats/repository/account"
 	"chats/system"
 	"fmt"
 )
@@ -25,33 +25,27 @@ const (
 	OnlineStatusAway    = "away"
 )
 
-func validateCreateAccount(account *sdk.CreateAccountRequest) (bool, *system.Error) {
+func validateCreateAccount(account *CreateAccountRequest) (bool, *system.Error) {
 
 	if account.Type == "" || (account.Type != AccountTypeAnonymousUser && account.Type != AccountTypeUser) {
-		return false, &system.Error{
-			Message: WsCreateAccountInvalidTypeErrorMessage,
-			Code:    WsCreateAccountInvalidTypeErrorCode,
-		}
+		return false, system.SysErr(nil, system.WsCreateAccountInvalidTypeErrorCode, nil)
 	}
 
 	if account.Account == "" {
-		return false, &system.Error{
-			Message: WsCreateAccountEmptyAccountErrorMessage,
-			Code:    WsCreateAccountEmptyAccountErrorCode,
-		}
+		return false, system.SysErr(nil, system.WsCreateAccountEmptyAccountErrorCode, nil)
 	}
 
 	return true, nil
 }
 
-func (ws *WsServer) createAccount(request *sdk.CreateAccountRequest) (*sdk.CreateAccountResponse, *system.Error) {
+func (ws *WsServer) createAccount(request *CreateAccountRequest) (*CreateAccountResponse, *system.Error) {
 
-	response := &sdk.CreateAccountResponse{
-		Errors: []sdk.ErrorResponse{},
+	response := &CreateAccountResponse{
+		Errors: []ErrorResponse{},
 	}
 
 	if ok, err := validateCreateAccount(request); !ok {
-		response.Errors = []sdk.ErrorResponse{
+		response.Errors = []ErrorResponse{
 			{
 				Message: err.Message,
 				Code:    err.Code,
@@ -61,7 +55,7 @@ func (ws *WsServer) createAccount(request *sdk.CreateAccountRequest) (*sdk.Creat
 		return response, nil
 	}
 
-	model := &models.Account{
+	model := &a.Account{
 		Id:         system.Uuid(),
 		Type:       request.Type,
 		Status:     AccountStatusActive,
@@ -75,18 +69,19 @@ func (ws *WsServer) createAccount(request *sdk.CreateAccountRequest) (*sdk.Creat
 		AvatarUrl:  request.AvatarUrl,
 	}
 
-	accountId, err := ws.hub.app.DB.CreateAccount(model)
+	rep := a.CreateRepository(app.Instance.Inf.DB)
+	accountId, err := rep.CreateAccount(model)
 	if err != nil {
 		return nil, err
 	}
 
-	onlineStatusModel := &models.OnlineStatus{
+	onlineStatusModel := &a.OnlineStatus{
 		Id:        system.Uuid(),
 		AccountId: accountId,
 		Status:    OnlineStatusOffline,
 	}
 
-	_, err = ws.hub.app.DB.CreateOnlineStatus(onlineStatusModel)
+	_, err = rep.CreateOnlineStatus(onlineStatusModel)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +91,7 @@ func (ws *WsServer) createAccount(request *sdk.CreateAccountRequest) (*sdk.Creat
 	return response, nil
 }
 
-func (ws *WsServer) setOnlineStatus(request *sdk.SetAccountOnlineStatusRequest) (*sdk.SetAccountOnlineStatusResponse, *system.Error) {
+func (ws *WsServer) setOnlineStatus(request *SetAccountOnlineStatusRequest) (*SetAccountOnlineStatusResponse, *system.Error) {
 
 	ok := false
 	for _, s := range []string{OnlineStatusOffline, OnlineStatusAway, OnlineStatusBusy, OnlineStatusOnline} {
@@ -112,8 +107,10 @@ func (ws *WsServer) setOnlineStatus(request *sdk.SetAccountOnlineStatusRequest) 
 		}
 	}
 
+	rep := a.CreateRepository(app.GetDB())
+
 	// get account
-	account, err := ws.hub.app.DB.GetAccount(request.Account.AccountId, request.Account.ExternalId)
+	account, err := rep.GetAccount(request.Account.AccountId, request.Account.ExternalId)
 	if err != nil {
 		return nil, err
 	}
@@ -126,21 +123,23 @@ func (ws *WsServer) setOnlineStatus(request *sdk.SetAccountOnlineStatusRequest) 
 	}
 
 	// update online status
-	err = ws.hub.app.DB.UpdateOnlineStatus(account.Id, request.Status)
+	err = rep.UpdateOnlineStatus(account.Id, request.Status)
 	if err != nil {
 		return nil, err
 	}
 
-	response := &sdk.SetAccountOnlineStatusResponse{Errors: []sdk.ErrorResponse{}}
+	response := &SetAccountOnlineStatusResponse{Errors: []ErrorResponse{}}
 
 	return response, nil
 
 }
 
-func (ws *WsServer) getOnlineStatus(request *sdk.GetAccountOnlineStatusRequest) (*sdk.GetAccountOnlineStatusResponse, *system.Error) {
+func (ws *WsServer) getOnlineStatus(request *GetAccountOnlineStatusRequest) (*GetAccountOnlineStatusResponse, *system.Error) {
+
+	rep := a.CreateRepository(app.GetDB())
 
 	// get account
-	account, err := ws.hub.app.DB.GetAccount(request.Account.AccountId, request.Account.ExternalId)
+	account, err := rep.GetAccount(request.Account.AccountId, request.Account.ExternalId)
 	if err != nil {
 		return nil, err
 	}
@@ -152,13 +151,13 @@ func (ws *WsServer) getOnlineStatus(request *sdk.GetAccountOnlineStatusRequest) 
 		}
 	}
 
-	status, err := ws.hub.app.DB.GetOnlineStatus(account.Id)
+	status, err := rep.GetOnlineStatus(account.Id)
 	if err != nil {
 		return nil, err
 	}
 
-	response := &sdk.GetAccountOnlineStatusResponse{
-		Errors: []sdk.ErrorResponse{},
+	response := &GetAccountOnlineStatusResponse{
+		Errors: []ErrorResponse{},
 		Status: status,
 	}
 
@@ -166,9 +165,11 @@ func (ws *WsServer) getOnlineStatus(request *sdk.GetAccountOnlineStatusRequest) 
 
 }
 
-func (ws *WsServer) updateAccount(request *sdk.UpdateAccountRequest) (*sdk.UpdateAccountResponse, *system.Error) {
+func (ws *WsServer) updateAccount(request *UpdateAccountRequest) (*UpdateAccountResponse, *system.Error) {
 
-	account, err := ws.hub.app.DB.GetAccount(request.AccountId.AccountId, request.AccountId.ExternalId)
+	rep := a.CreateRepository(app.GetDB())
+
+	account, err := rep.GetAccount(request.AccountId.AccountId, request.AccountId.ExternalId)
 	if err != nil {
 		return nil, err
 	}
@@ -187,18 +188,20 @@ func (ws *WsServer) updateAccount(request *sdk.UpdateAccountRequest) (*sdk.Updat
 	account.Email = request.Email
 	account.AvatarUrl = request.AvatarUrl
 
-	if err := ws.hub.app.DB.UpdateAccount(account); err != nil {
+	if err := rep.UpdateAccount(account); err != nil {
 		return nil, err
 	}
 
-	response := &sdk.UpdateAccountResponse{Errors: []sdk.ErrorResponse{}}
+	response := &UpdateAccountResponse{Errors: []ErrorResponse{}}
 	return response, nil
 
 }
 
-func (ws *WsServer) getAccountsByCriteria(criteria *sdk.GetAccountsByCriteriaRequest) (*sdk.GetAccountsByCriteriaResponse, *system.Error) {
+func (ws *WsServer) getAccountsByCriteria(criteria *GetAccountsByCriteriaRequest) (*GetAccountsByCriteriaResponse, *system.Error) {
 
-	items, err := ws.hub.app.DB.GetAccountsByCriteria(&models.GetAccountsCriteria{
+	rep := a.CreateRepository(app.GetDB())
+
+	items, err := rep.GetAccountsByCriteria(&a.GetAccountsCriteria{
 		AccountId:  criteria.AccountId.AccountId,
 		ExternalId: criteria.AccountId.ExternalId,
 		Email:      criteria.Email,
@@ -208,9 +211,9 @@ func (ws *WsServer) getAccountsByCriteria(criteria *sdk.GetAccountsByCriteriaReq
 		return nil, err
 	}
 
-	response := &sdk.GetAccountsByCriteriaResponse{Accounts: []sdk.Account{}, Errors: []sdk.ErrorResponse{}}
+	response := &GetAccountsByCriteriaResponse{Accounts: []Account{}, Errors: []ErrorResponse{}}
 	for _, i := range items {
-		response.Accounts = append(response.Accounts, sdk.Account{
+		response.Accounts = append(response.Accounts, Account{
 			Id:         i.Id,
 			Account:    i.Account,
 			Type:       i.Type,
@@ -228,9 +231,11 @@ func (ws *WsServer) getAccountsByCriteria(criteria *sdk.GetAccountsByCriteriaReq
 
 }
 
-func (ws *WsServer) getAccountById(request *sdk.AccountIdRequest) (*sdk.Account, *system.Error) {
+func (ws *WsServer) getAccountById(request *AccountIdRequest) (*Account, *system.Error) {
 
-	accountModel, err := ws.hub.app.DB.GetAccount(request.AccountId, request.ExternalId)
+	rep := a.CreateRepository(app.GetDB())
+
+	accountModel, err := rep.GetAccount(request.AccountId, request.ExternalId)
 	if err != nil {
 		return nil, err
 	}

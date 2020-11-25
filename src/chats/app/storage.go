@@ -1,8 +1,7 @@
-package database
+package app
 
 import (
 	"chats/system"
-	"chats/redis"
 	"fmt"
 	"gorm.io/gorm/logger"
 	"gorm.io/driver/postgres"
@@ -16,23 +15,23 @@ import (
 type Storage struct {
 	Loc      *time.Location
 	Instance *gorm.DB
-	Redis    *redis.Redis
+	Redis    *Redis
 }
 
-func Init() *Storage {
+func initStorage() *Storage {
 	s := &Storage{}
-	s.Loc = s.setLocation()    //	location
-	s.Instance = s.gormInit(0) //	gorm [mysql]
-	s.Redis = redis.Init(0)    //	redis
+	s.Loc = s.setLocation()
+	s.Instance = s.gormInit(0)
+	s.Redis = InitRedis(0)
 	return s
 }
 
 func (s *Storage) setLocation() *time.Location {
-	loc, err := system.Location()
+	loc, err := Instance.GetLocation()
 	if err != nil {
-		system.ErrHandler.SetError(&system.Error{
+		Instance.ErrorHandler.SetError(&system.Error{
 			Error:   err,
-			Message: system.LoadLocationError,
+			Message: system.GetError(system.LoadLocationErrorCode),
 			Code:    system.LoadLocationErrorCode,
 		})
 	}
@@ -63,17 +62,17 @@ func (s *Storage) gormInit(attempt uint) *gorm.DB {
 
 	db, err := gorm.Open(postgres.Open(dsn), cfg)
 	if err != nil {
-		system.ErrHandler.SetError(&system.Error{
+		Instance.ErrorHandler.SetError(&system.Error{
 			Error:   err,
-			Message: MysqlConnectionProblem + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
-			Code:    MysqlConnectionProblemCode,
+			Message: system.MysqlConnectionProblem + "; attempt: " + strconv.FormatUint(uint64(attempt), 10),
+			Code:    system.MysqlConnectionProblemCode,
 		})
 
-		system.Reconnect(MysqlConnectionProblem, &attempt)
+		Instance.Inf.Reconnect(system.MysqlConnectionProblem, &attempt)
 
 		return s.gormInit(attempt)
 	}
-	log.Println("Database connected")
+	L().Debug("Database connected")
 
 	return db
 }

@@ -1,7 +1,8 @@
-package models
+package account
 
 import (
-	"github.com/satori/go.uuid"
+	rep "chats/repository"
+	uuid "github.com/satori/go.uuid"
 )
 
 type Account struct {
@@ -16,14 +17,14 @@ type Account struct {
 	Email      string `gorm:"column:email"`
 	Phone      string `gorm:"column:phone"`
 	AvatarUrl  string `gorm:"column:avatar_url"`
-	BaseModel
+	rep.BaseModel
 }
 
 type OnlineStatus struct {
 	Id        uuid.UUID
 	AccountId uuid.UUID `gorm:"column:account_id"`
 	Status    string    `gorm:"column:status"`
-	BaseModel
+	rep.BaseModel
 }
 
 type GetAccountsCriteria struct {

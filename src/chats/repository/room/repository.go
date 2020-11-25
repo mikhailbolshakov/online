@@ -1,7 +1,8 @@
-package database
+package room
 
 import (
-	"chats/models"
+	"chats/app"
+	rep "chats/repository"
 	"chats/system"
 	"encoding/json"
 	"fmt"
@@ -15,41 +16,53 @@ const (
 	MessageStatusRead = "read"
 )
 
-func (db *Storage) CreateRoom(roomModel *models.Room) (uuid.UUID, *system.Error) {
+type Repository struct {
+	Storage *app.Storage
+	Redis   *app.Redis
+}
 
-	result := db.Instance.Create(roomModel)
+func CreateRepository(storage *app.Storage) *Repository {
+	return &Repository{
+		Storage: storage,
+		Redis:   storage.Redis,
+	}
+}
+
+func (r *Repository) CreateRoom(roomModel *Room) (uuid.UUID, *system.Error) {
+
+	result := r.Storage.Instance.Create(roomModel)
 
 	if result.Error != nil {
 		return uuid.Nil, &system.Error{Error: result.Error}
 	}
-	db.Redis.SetRoom(roomModel)
+	r.redisSetRoom(roomModel)
 
 	return roomModel.Id, nil
 
 }
 
-func (db *Storage) RoomSubscribeAccount(roomModel *models.Room, subscriber *models.RoomSubscriber) (uuid.UUID, *system.Error) {
+func (r *Repository) RoomSubscribeAccount(roomModel *Room, subscriber *RoomSubscriber) (uuid.UUID, *system.Error) {
 
-	result := db.Instance.Create(subscriber)
+	result := r.Storage.Instance.Create(subscriber)
 	if result.Error != nil {
 		return uuid.Nil, &system.Error{Error: result.Error}
 	}
-	db.Redis.SetRoom(roomModel)
+	r.redisSetRoom(roomModel)
 
 	return subscriber.Id, nil
 
 }
 
-func (db *Storage) RoomUnsubscribeAccount(roomId, accountId uuid.UUID) *system.Error {
+func (r *Repository) RoomUnsubscribeAccount(roomId, accountId uuid.UUID) *system.Error {
 
 	t := time.Now()
 
-	db.Instance.Model(&models.RoomSubscriber{}).
+	r.Storage.Instance.Model(&RoomSubscriber{}).
 		Where("account_id = ?::uuid", accountId).
 		Where("room_id = ?::uuid", roomId).
 		Updates(map[string]interface{}{"unsubscribe_at": t, "updated_at": t})
 
-	err := db.Redis.DeleteRooms([]uuid.UUID{roomId})
+	err := r.redisDeleteRooms([]uuid.UUID{roomId})
 	if err != nil {
 		return err
 	}
@@ -58,11 +71,11 @@ func (db *Storage) RoomUnsubscribeAccount(roomId, accountId uuid.UUID) *system.E
 
 }
 
-func (db *Storage) GetRoom(id uuid.UUID) (*models.Room, *system.Error) {
+func (r *Repository) GetRoom(id uuid.UUID) (*Room, *system.Error) {
 
-	room := &models.Room{}
+	room := &Room{}
 
-	room, err := db.Redis.GetRoom(id)
+	room, err := r.redisGetRoom(id)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +84,7 @@ func (db *Storage) GetRoom(id uuid.UUID) (*models.Room, *system.Error) {
 		return room, nil
 	} else {
 
-		err := db.Instance.
+		err := r.Storage.Instance.
 			Preload("Subscribers").
 			First(room, id).Error
 
@@ -79,28 +92,28 @@ func (db *Storage) GetRoom(id uuid.UUID) (*models.Room, *system.Error) {
 			return nil, system.E(err)
 		}
 
-		db.Redis.SetRoom(room)
+		r.redisSetRoom(room)
 
 		return room, nil
 	}
 }
 
-func (db *Storage) CloseRoom(roomId uuid.UUID) *system.Error {
-	roomModel := &models.Room{}
+func (r *Repository) CloseRoom(roomId uuid.UUID) *system.Error {
+	roomModel := &Room{}
 
 	t := time.Now()
 	roomModel.ClosedAt = &t
 	roomModel.UpdatedAt = t
 
-	db.Instance.Model(roomModel).
+	r.Storage.Instance.Model(roomModel).
 		Where("id = ?::uuid", roomId).
 		Updates(map[string]interface{}{"closed_at": roomModel.ClosedAt, "updated_at": roomModel.UpdatedAt})
-	db.Redis.DeleteRooms([]uuid.UUID{roomModel.Id})
+	r.redisDeleteRooms([]uuid.UUID{roomModel.Id})
 
 	return nil
 }
 
-func (db *Storage) CloseRoomsByAccounts(accountIds []uuid.UUID) ([]uuid.UUID, *system.Error) {
+func (r *Repository) CloseRoomsByAccounts(accountIds []uuid.UUID) ([]uuid.UUID, *system.Error) {
 
 	var roomIds []uuid.UUID
 
@@ -110,8 +123,8 @@ func (db *Storage) CloseRoomsByAccounts(accountIds []uuid.UUID) ([]uuid.UUID, *s
 
 	closeTime := time.Now()
 
-	db.Instance.Begin()
-	rows, err := db.Instance.Raw(`
+	r.Storage.Instance.Begin()
+	rows, err := r.Storage.Instance.Raw(`
 			update rooms r set closed_at = ?, updated_at = ?
 				where r.closed_at is null and
                       exists(select 1 
@@ -126,7 +139,7 @@ func (db *Storage) CloseRoomsByAccounts(accountIds []uuid.UUID) ([]uuid.UUID, *s
 	defer rows.Close()
 
 	if err != nil {
-		db.Instance.Rollback()
+		r.Storage.Instance.Rollback()
 		return roomIds, &system.Error{
 			Error: err,
 			// TODO: const
@@ -134,11 +147,11 @@ func (db *Storage) CloseRoomsByAccounts(accountIds []uuid.UUID) ([]uuid.UUID, *s
 		}
 	} else {
 
-		db.Instance.Commit()
+		r.Storage.Instance.Commit()
 
 		for rows.Next() {
 			var roomId string
-			err := db.Instance.ScanRows(rows, &roomId)
+			err := r.Storage.Instance.ScanRows(rows, &roomId)
 			if err != nil {
 				return roomIds, &system.Error{
 					Error:   err,
@@ -151,7 +164,7 @@ func (db *Storage) CloseRoomsByAccounts(accountIds []uuid.UUID) ([]uuid.UUID, *s
 			}
 
 			// clear cache
-			e := db.Redis.DeleteRooms(roomIds)
+			e := r.redisDeleteRooms(roomIds)
 			if e != nil {
 				return roomIds, e
 			}
@@ -164,9 +177,9 @@ func (db *Storage) CloseRoomsByAccounts(accountIds []uuid.UUID) ([]uuid.UUID, *s
 
 }
 
-func (db *Storage) GetRoomSubscribers(roomId uuid.UUID) ([]models.RoomSubscriber, *system.Error) {
+func (r *Repository) GetRoomSubscribers(roomId uuid.UUID) ([]RoomSubscriber, *system.Error) {
 
-	room, err := db.Redis.GetRoom(roomId)
+	room, err := r.redisGetRoom(roomId)
 	if err != nil {
 		return nil, err
 	}
@@ -175,9 +188,9 @@ func (db *Storage) GetRoomSubscribers(roomId uuid.UUID) ([]models.RoomSubscriber
 		return room.Subscribers, nil
 	}
 
-	subscribes := []models.RoomSubscriber{}
+	subscribes := []RoomSubscriber{}
 
-	db.Instance.
+	r.Storage.Instance.
 		Where("room_id = ?::uuid", roomId).
 		Where("unsubscribe_at is null").
 		Find(&subscribes)
@@ -185,9 +198,9 @@ func (db *Storage) GetRoomSubscribers(roomId uuid.UUID) ([]models.RoomSubscriber
 	return subscribes, nil
 }
 
-func (db *Storage) GetRooms(criteria *models.GetRoomCriteria) ([]models.Room, *system.Error) {
+func (db *Repository) GetRooms(criteria *GetRoomCriteria) ([]Room, *system.Error) {
 
-	q := db.Instance.Table("rooms r")
+	q := db.Storage.Instance.Table("rooms r")
 
 	if criteria.RoomId != uuid.Nil {
 		q = q.Where("r.id = ?::uuid", criteria.RoomId)
@@ -226,10 +239,10 @@ func (db *Storage) GetRooms(criteria *models.GetRoomCriteria) ([]models.Room, *s
 		}
 	}
 
-	var result []models.Room
+	var result []Room
 	for rows.Next() {
-		room := &models.Room{}
-		err := db.Instance.ScanRows(rows, room)
+		room := &Room{}
+		err := db.Storage.Instance.ScanRows(rows, room)
 		if err != nil {
 			return nil, &system.Error{
 				Error:   err,
@@ -252,11 +265,11 @@ func (db *Storage) GetRooms(criteria *models.GetRoomCriteria) ([]models.Room, *s
 
 }
 
-func (db *Storage) GetAccountSubscribers(accountId uuid.UUID) map[uuid.UUID]models.AccountSubscriber {
+func (db *Repository) GetAccountSubscribers(accountId uuid.UUID) map[uuid.UUID]AccountSubscriber {
 
-	result := make(map[uuid.UUID]models.AccountSubscriber)
+	result := make(map[uuid.UUID]AccountSubscriber)
 
-	rows, err := db.Instance.Raw(`
+	rows, err := db.Storage.Instance.Raw(`
 		select r.id as room_id,
 			   rs.account_id,
 			   rs.id as subscriber_id,
@@ -276,19 +289,19 @@ func (db *Storage) GetAccountSubscribers(accountId uuid.UUID) map[uuid.UUID]mode
 	}
 
 	for rows.Next() {
-		item := &models.AccountSubscriber{}
-		db.Instance.ScanRows(rows, item)
+		item := &AccountSubscriber{}
+		db.Storage.Instance.ScanRows(rows, item)
 		result[item.RoomId] = *item
 	}
 
 	return result
 }
 
-func (db *Storage) GetRoomAccountSubscribers(roomId uuid.UUID) []models.AccountSubscriber {
+func (db *Repository) GetRoomAccountSubscribers(roomId uuid.UUID) []AccountSubscriber {
 
-	var result []models.AccountSubscriber
+	var result []AccountSubscriber
 
-	rows, err := db.Instance.Raw(`
+	rows, err := db.Storage.Instance.Raw(`
 		select r.id as room_id,
 			   rs.account_id,
 			   rs.id as subscriber_id,
@@ -308,18 +321,18 @@ func (db *Storage) GetRoomAccountSubscribers(roomId uuid.UUID) []models.AccountS
 	}
 
 	for rows.Next() {
-		item := &models.AccountSubscriber{}
-		db.Instance.ScanRows(rows, item)
+		item := &AccountSubscriber{}
+		db.Storage.Instance.ScanRows(rows, item)
 		result = append(result, *item)
 	}
 
 	return result
 }
 
-func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria, pagingRequest *models.PagingRequest) ([]models.MessageHistoryItem,
-																														*models.PagingResponse,
-																														[]models.MessageAccount,
-																														*system.Error) {
+func (db *Repository) GetMessageHistory(criteria *GetMessageHistoryCriteria, pagingRequest *rep.PagingRequest) ([]MessageHistoryItem,
+	*rep.PagingResponse,
+	[]MessageAccount,
+	*system.Error) {
 
 	type item struct {
 		Id               uuid.UUID `gorm:"column:id"`
@@ -339,7 +352,7 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 		"createdAt": "cm.created_at",
 	}
 
-	var result []models.MessageHistoryItem
+	var result []MessageHistoryItem
 
 	selectClause := `
 			cm.id,
@@ -354,7 +367,7 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 		  	sender_acc.external_id
 			`
 
-	query := db.Instance.
+	query := db.Storage.Instance.
 		Table(`
 			chat_messages cm 
 	  			inner join rooms r on cm.room_id = r.id
@@ -417,7 +430,7 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 		offset = (pagingRequest.Index - 1) * pagingRequest.Size
 	}
 
-	pagingResponse := &models.PagingResponse{
+	pagingResponse := &rep.PagingResponse{
 		Total: int(math.Ceil(float64(totalCount) / float64(pagingRequest.Size))),
 		Index: pagingRequest.Index,
 	}
@@ -433,7 +446,7 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 	var roomIds []uuid.UUID
 	for rows.Next() {
 		item := &item{}
-		_ = db.Instance.ScanRows(rows, item)
+		_ = db.Storage.Instance.ScanRows(rows, item)
 
 		jsonParams := make(map[string]string)
 		if item.Params != "" {
@@ -443,7 +456,7 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 			}
 		}
 
-		result = append(result, models.MessageHistoryItem{
+		result = append(result, MessageHistoryItem{
 			Id:               item.Id,
 			ClientMessageId:  item.ClientMessageId,
 			ReferenceId:      item.ReferenceId,
@@ -454,7 +467,7 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 			Params:           jsonParams,
 			SenderAccountId:  item.SenderAccountId,
 			SenderExternalId: item.SenderExternalId,
-			Statuses:         []models.MessageStatus{},
+			Statuses:         []MessageStatus{},
 		})
 		roomIds = append(roomIds, item.RoomId)
 	}
@@ -469,7 +482,7 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 			StatusDate time.Time `gorm:"column:status_date"`
 		}
 
-		statuses, err := db.Instance.Raw(`
+		statuses, err := db.Storage.Instance.Raw(`
 				select cms.message_id,
 					   cms.account_id,
 					   cms.status,
@@ -485,11 +498,11 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 
 		for statuses.Next() {
 			item := &statusRes{}
-			_ = db.Instance.ScanRows(statuses, item)
+			_ = db.Storage.Instance.ScanRows(statuses, item)
 			for i, _ := range result {
 				r := &result[i]
 				if uuid.Equal(r.Id, item.MessageId) {
-					r.Statuses = append(r.Statuses, models.MessageStatus{
+					r.Statuses = append(r.Statuses, MessageStatus{
 						AccountId:  item.AccountId,
 						Status:     item.Status,
 						StatusDate: item.StatusDate,
@@ -501,7 +514,7 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 	}
 
 	// populate accounts
-	var accountsResult []models.MessageAccount
+	var accountsResult []MessageAccount
 	if criteria.WithAccounts {
 		accounts, e := db.getMessageAccounts(roomIds)
 		if e != nil {
@@ -513,11 +526,11 @@ func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria,
 	return result, pagingResponse, accountsResult, nil
 }
 
-func (db *Storage) getMessageAccounts(roomIds []uuid.UUID) ([]models.MessageAccount, *system.Error) {
+func (db *Repository) getMessageAccounts(roomIds []uuid.UUID) ([]MessageAccount, *system.Error) {
 
-	var result []models.MessageAccount
+	var result []MessageAccount
 
-	err := db.Instance.Raw(`
+	err := db.Storage.Instance.Raw(`
 			 select a.* 
 			   from room_subscribers rs 
 			   inner join accounts a on rs.account_id = a.id 
@@ -532,16 +545,16 @@ func (db *Storage) getMessageAccounts(roomIds []uuid.UUID) ([]models.MessageAcco
 	return result, nil
 }
 
-func (db *Storage) SetReadStatus(messageId uuid.UUID, accountId uuid.UUID) *system.Error {
+func (db *Repository) SetReadStatus(messageId uuid.UUID, accountId uuid.UUID) *system.Error {
 
 	// set status for all subscribers with the session's account
-	err := db.Instance.
-		Model(&models.ChatMessageStatus{}).
+	err := db.Storage.Instance.
+		Model(&ChatMessageStatus{}).
 		Where("message_id = ?::uuid", messageId).
 		Where("account_id = ?::uuid", accountId).
-		Updates(&models.ChatMessageStatus{
+		Updates(&ChatMessageStatus{
 			Status: MessageStatusRead,
-			BaseModel: models.BaseModel{
+			BaseModel: rep.BaseModel{
 				UpdatedAt: time.Now(),
 			},
 		}).Error
@@ -552,11 +565,11 @@ func (db *Storage) SetReadStatus(messageId uuid.UUID, accountId uuid.UUID) *syst
 	return nil
 }
 
-func (db *Storage) CreateMessage(messageModel *models.ChatMessage, opponents []models.ChatOpponent) *system.Error {
+func (db *Repository) CreateMessage(messageModel *ChatMessage, opponents []ChatOpponent) *system.Error {
 
 	if len(messageModel.ClientMessageId) > 0 {
-		checkMessage := &models.ChatMessage{}
-		db.Instance.
+		checkMessage := &ChatMessage{}
+		db.Storage.Instance.
 			Where("room_id = ?::uuid", messageModel.RoomId).
 			Where("client_message_id = ?", messageModel.ClientMessageId).
 			First(checkMessage)
@@ -567,7 +580,7 @@ func (db *Storage) CreateMessage(messageModel *models.ChatMessage, opponents []m
 		}
 	}
 
-	tx := db.Instance.Begin()
+	tx := db.Storage.Instance.Begin()
 	err := tx.Create(messageModel).Error
 	if err != nil {
 		return &system.Error{Error: err}
@@ -575,7 +588,7 @@ func (db *Storage) CreateMessage(messageModel *models.ChatMessage, opponents []m
 
 	for _, o := range opponents {
 
-		status := &models.ChatMessageStatus{
+		status := &ChatMessageStatus{
 			Id:          system.Uuid(),
 			AccountId:   o.AccountId,
 			MessageId:   messageModel.Id,
@@ -596,4 +609,35 @@ func (db *Storage) CreateMessage(messageModel *models.ChatMessage, opponents []m
 	}
 
 	return nil
+}
+
+func (db *Repository) RecdUsers(createdAt time.Time) []RoomSubscriber {
+	subscribers := []RoomSubscriber{}
+
+	//db.Storage.Instance.
+	//	Table("room_subscribers cs").
+	//	Joins("left join chat_message_statuses cms on cms.subscribe_id = cs.id").
+	//	Joins("left join room_subscribers cs2 on cs2.room_id = cs.room_id").
+	//	Where("cms.created_at >= ?", createdAt).
+	//	Where("cms.status = ?", MessageStatusRecd).
+	//	Where("cs.user_type = ?", UserTypeUser).
+	//	Where("cs2.user_type != ?", UserTypeUser).
+	//	//Pluck("distinct(cs.user_id)", &users)
+	//	Select("distinct(cs.user_id), cs2.user_type, cs.chat_id").Scan(&subscribers)
+
+	return subscribers
+}
+
+func (db *Repository) LastOpponentId(userId uuid.UUID) uuid.UUID {
+	subscribe := &RoomSubscriber{}
+
+	db.Storage.Instance.Raw("select cs2.user_id "+
+		"from chat_subscribes cs1 "+
+		"left join chats c on c.id = cs1.chat_id "+
+		"left join chat_subscribes cs2 on cs2.chat_id = cs1.chat_id "+
+		"where c.status = 'opened' and cs1.user_type = 'client' and cs1.user_id = ? and cs1.active = 1 "+
+		"and cs2.user_type in ('doctor', 'operator') and cs2.active = 1 "+
+		"order by c.id desc limit 1", userId).Scan(subscribe)
+
+	return uuid.Nil //subscribe.AccountId
 }

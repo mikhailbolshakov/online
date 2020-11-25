@@ -1,18 +1,9 @@
-package sdk
+package server
 
 import (
 	uuid "github.com/satori/go.uuid"
 	"time"
 )
-
-type Room struct {
-	Id          uuid.UUID `json:"id"`
-	ReferenceId string    `json:"referenceId"`
-	Hash        string    `json:"hash"`
-	Chat        bool      `json:"chat"`
-	Video       bool      `json:"video"`
-	Audio       bool      `json:"audio"`
-}
 
 type SubscriberRequest struct {
 	Account *AccountIdRequest `json:"account"`
