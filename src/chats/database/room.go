@@ -2,27 +2,18 @@ package database
 
 import (
 	"chats/models"
-	"chats/sdk"
 	"chats/system"
+	"encoding/json"
+	"fmt"
 	uuid "github.com/satori/go.uuid"
+	"math"
 	"time"
 )
 
 const (
-	ChatStatusOpened  = "opened"
-	ChatStatusClosed  = "closed"
-	CountChatsDefault = 20
+	MessageStatusRecd = "recd"
+	MessageStatusRead = "read"
 )
-
-type chatListDataItem struct {
-	Id             uuid.UUID `json:"id"`
-	Status         string    `json:"status"`
-	ReferenceId    string    `json:"reference_id"`
-	AccountId      uuid.UUID `json:"account_id"`
-	Role           string    `json:"role"`
-	InsertDate     time.Time `json:"insert_date"`
-	LastUpdateDate time.Time `json:"last_update_date"`
-}
 
 func (db *Storage) CreateRoom(roomModel *models.Room) (uuid.UUID, *system.Error) {
 
@@ -96,18 +87,17 @@ func (db *Storage) GetRoom(id uuid.UUID) (*models.Room, *system.Error) {
 
 func (db *Storage) CloseRoom(roomId uuid.UUID) *system.Error {
 	roomModel := &models.Room{}
-	roomModel.Id = roomId
-
-	db.Instance.First(roomModel)
 
 	t := time.Now()
 	roomModel.ClosedAt = &t
 	roomModel.UpdatedAt = t
 
-	db.Instance.Model(roomModel).Updates(map[string]interface{}{"closed_at": roomModel.ClosedAt, "updated_at": roomModel.UpdatedAt})
+	db.Instance.Model(roomModel).
+		Where("id = ?::uuid", roomId).
+		Updates(map[string]interface{}{"closed_at": roomModel.ClosedAt, "updated_at": roomModel.UpdatedAt})
 	db.Redis.DeleteRooms([]uuid.UUID{roomModel.Id})
 
-	return &system.Error{Error: db.Instance.Error}
+	return nil
 }
 
 func (db *Storage) CloseRoomsByAccounts(accountIds []uuid.UUID) ([]uuid.UUID, *system.Error) {
@@ -271,7 +261,7 @@ func (db *Storage) GetAccountSubscribers(accountId uuid.UUID) map[uuid.UUID]mode
 			   rs.account_id,
 			   rs.id as subscriber_id,
 			   rs.role	
-			from room_subscribes rs
+			from room_subscribers rs
 				join rooms r on r.id = rs.room_id
 			where rs.account_id = ?::uuid and 
 				  rs.unsubscribe_at is null and 
@@ -303,7 +293,7 @@ func (db *Storage) GetRoomAccountSubscribers(roomId uuid.UUID) []models.AccountS
 			   rs.account_id,
 			   rs.id as subscriber_id,
 			   rs.role	
-			from room_subscribes rs
+			from room_subscribers rs
 				join rooms r on r.id = rs.room_id
 			where r.id = ?::uuid and 
 				  rs.unsubscribe_at is null and 
@@ -326,78 +316,284 @@ func (db *Storage) GetRoomAccountSubscribers(roomId uuid.UUID) []models.AccountS
 	return result
 }
 
-func (db *Storage) GetAccountChats(accountId uuid.UUID, limit int) ([]sdk.ChatListResponseDataItem, *system.Error) {
+func (db *Storage) GetMessageHistory(criteria *models.GetMessageHistoryCriteria, pagingRequest *models.PagingRequest) ([]models.MessageHistoryItem,
+																														*models.PagingResponse,
+																														[]models.MessageAccount,
+																														*system.Error) {
 
-	if limit == 0 {
-		limit = CountChatsDefault
+	type item struct {
+		Id               uuid.UUID `gorm:"column:id"`
+		ClientMessageId  string    `gorm:"column:client_message_id"`
+		ReferenceId      string    `gorm:"column:reference_id"`
+		RoomId           uuid.UUID `gorm:"column:room_id"`
+		Type             string    `gorm:"column:type"`
+		Message          string    `gorm:"column:message"`
+		FileId           string    `gorm:"column:file_id"`
+		Params           string    `gorm:"column:params"`
+		SenderAccountId  uuid.UUID `gorm:"column:account_id"`
+		SenderExternalId string    `gorm:"column:external_id"`
 	}
 
-	var chats []uuid.UUID
-	var result []sdk.ChatListResponseDataItem
+	// here we map incoming sort fields with real fields in the query
+	var sortMap = map[string]string{
+		"createdAt": "cm.created_at",
+	}
 
-	var sql = `
-		select
-			r.id,
-			r.closed_at,
-			r.reference_id,
-			r.created_at as insert_date,
-			coalesce((select max(cm.created_at)
-								from chat_messages cm
-								where cm.chat_id = r.id
-								and cm.deleted_at is null
-			), r.created_at) as last_update_date
-		from
-			room_subscribes rs
-		inner join rooms r on
-			r.id = rs.room_id
-		where
-			rs.account_id = ?::uuid and
-			r.chat = 1 
-		order by rs.created_at desc
-		limit ?`
+	var result []models.MessageHistoryItem
 
-	rows, err := db.Instance.
-		Raw(sql, accountId, limit).
-		Rows()
+	selectClause := `
+			cm.id,
+		  	cm.client_message_id,
+		  	r.reference_id,
+		  	r.id as room_id,
+		  	cm."type",
+		  	cm.message,
+		  	cm.account_id,
+			cm.file_id,
+			cm.params,
+		  	sender_acc.external_id
+			`
 
-	defer rows.Close()
+	query := db.Instance.
+		Table(`
+			chat_messages cm 
+	  			inner join rooms r on cm.room_id = r.id
+	  			inner join accounts sender_acc on cm.account_id = sender_acc.id`).
+		Where(`
+			r.chat = 1  and
+		  	r.deleted_at is null and
+		  	cm.deleted_at is null`)
+
+	if criteria.RoomId != uuid.Nil {
+		query = query.Where("r.id = ?::uuid", criteria.RoomId)
+	}
+
+	if criteria.ReferenceId != "" {
+		query = query.Where("r.reference_id = ?", criteria.ReferenceId)
+	}
+
+	if criteria.AccountId != uuid.Nil {
+		query = query.Where(`exists(select 1 
+											from room_subscribers rs
+											where rs.room_id = r.id and
+											rs.account_id = ?::uuid)`, criteria.AccountId)
+	}
+
+	if criteria.AccountExternalId != "" {
+		query = query.Where(`exists(select 1 
+												from room_subscribers rs
+													inner join accounts acc_s on rs.account_id = acc_s.id 
+												where rs.room_id = r.id and
+												acc_s.external_id = ?)`, criteria.AccountExternalId)
+	}
+
+	if criteria.CreatedAfter != nil {
+		query = query.Where(`cm.created_at >= ?`, criteria.CreatedAfter)
+	}
+
+	if criteria.CreatedBefore != nil {
+		query = query.Where(`cm.created_at <= ?`, criteria.CreatedBefore)
+	}
+
+	if criteria.SentOnly {
+		query = query.Where("cm.account_id = ?::uuid", criteria.AccountId)
+	}
+
+	if criteria.ReceivedOnly {
+		query = query.Where("cm.account_id <> ?::uuid", criteria.AccountId)
+	}
+
+	for _, s := range pagingRequest.SortBy {
+		query = query.Order(fmt.Sprintf("%s %s", sortMap[s.Field], s.Direction))
+	}
+
+	// paging
+	var totalCount int64
+	var offset int
+
+	query.Count(&totalCount)
+
+	if totalCount > int64(pagingRequest.Size) {
+		offset = (pagingRequest.Index - 1) * pagingRequest.Size
+	}
+
+	pagingResponse := &models.PagingResponse{
+		Total: int(math.Ceil(float64(totalCount) / float64(pagingRequest.Size))),
+		Index: pagingRequest.Index,
+	}
+
+	query = query.Select(selectClause).Offset(offset).Limit(pagingRequest.Size)
+
+	rows, err := query.Rows()
 	if err != nil {
-		return nil, &system.Error{Error: err}
+		return nil, nil, nil, system.E(err)
 	}
+	defer rows.Close()
 
+	var roomIds []uuid.UUID
 	for rows.Next() {
-		chatListDataItem := chatListDataItem{}
-		if err := db.Instance.ScanRows(rows, &chatListDataItem); err != nil {
-			return nil, &system.Error{Error: err}
-		} else {
-			ChatListResponseDataItem := &sdk.ChatListResponseDataItem{
-				ChatListDataItem: sdk.ChatListDataItem{
-					Id:             chatListDataItem.Id,
-					Status:         chatListDataItem.Status,
-					ReferenceId:    chatListDataItem.ReferenceId,
-					InsertDate:     chatListDataItem.InsertDate.In(db.Loc).Format(time.RFC3339),
-					LastUpdateDate: chatListDataItem.LastUpdateDate.In(db.Loc).Format(time.RFC3339),
-				},
+		item := &item{}
+		_ = db.Instance.ScanRows(rows, item)
+
+		jsonParams := make(map[string]string)
+		if item.Params != "" {
+			err := json.Unmarshal([]byte(item.Params), &jsonParams)
+			if err != nil {
+				return nil, nil, nil, system.E(err)
 			}
-			result = append(result, *ChatListResponseDataItem)
-			chats = append(chats, chatListDataItem.Id)
 		}
+
+		result = append(result, models.MessageHistoryItem{
+			Id:               item.Id,
+			ClientMessageId:  item.ClientMessageId,
+			ReferenceId:      item.ReferenceId,
+			RoomId:           item.RoomId,
+			Type:             item.Type,
+			Message:          item.Message,
+			FileId:           item.FileId,
+			Params:           jsonParams,
+			SenderAccountId:  item.SenderAccountId,
+			SenderExternalId: item.SenderExternalId,
+			Statuses:         []models.MessageStatus{},
+		})
+		roomIds = append(roomIds, item.RoomId)
 	}
 
-	if len(chats) > 0 {
-		opponents, err := db.GetOpponents(chats, accountId)
-		if err != nil {
-			return nil, err
+	// populate statuses
+	if criteria.WithStatuses {
+
+		type statusRes struct {
+			MessageId  uuid.UUID `gorm:"column:message_id"`
+			AccountId  uuid.UUID `gorm:"column:account_id"`
+			Status     string    `gorm:"column:status"`
+			StatusDate time.Time `gorm:"column:status_date"`
 		}
 
-		for i, item := range result {
-			for chatId, opponent := range opponents {
-				if item.Id == chatId {
-					result[i].Opponent = opponent
+		statuses, err := db.Instance.Raw(`
+				select cms.message_id,
+					   cms.account_id,
+					   cms.status,
+					   cms.created_at status_date
+					from chat_message_statuses cms
+					inner join chat_messages cm on cms.message_id = cm.id 
+				where cm.room_id in (?)`, roomIds).
+			Rows()
+		if err != nil {
+			return nil, nil, nil, system.E(err)
+		}
+		defer statuses.Close()
+
+		for statuses.Next() {
+			item := &statusRes{}
+			_ = db.Instance.ScanRows(statuses, item)
+			for i, _ := range result {
+				r := &result[i]
+				if uuid.Equal(r.Id, item.MessageId) {
+					r.Statuses = append(r.Statuses, models.MessageStatus{
+						AccountId:  item.AccountId,
+						Status:     item.Status,
+						StatusDate: item.StatusDate,
+					})
 				}
 			}
 		}
+
+	}
+
+	// populate accounts
+	var accountsResult []models.MessageAccount
+	if criteria.WithAccounts {
+		accounts, e := db.getMessageAccounts(roomIds)
+		if e != nil {
+			return nil, nil, nil, e
+		}
+		accountsResult = accounts
+	}
+
+	return result, pagingResponse, accountsResult, nil
+}
+
+func (db *Storage) getMessageAccounts(roomIds []uuid.UUID) ([]models.MessageAccount, *system.Error) {
+
+	var result []models.MessageAccount
+
+	err := db.Instance.Raw(`
+			 select a.* 
+			   from room_subscribers rs 
+			   inner join accounts a on rs.account_id = a.id 
+			 where rs.system_account <> 1 and 
+				   rs.deleted_at is null and
+					rs.room_id in (?)
+		`, roomIds).Scan(&result).Error
+	if err != nil {
+		return nil, system.E(err)
 	}
 
 	return result, nil
+}
+
+func (db *Storage) SetReadStatus(messageId uuid.UUID, accountId uuid.UUID) *system.Error {
+
+	// set status for all subscribers with the session's account
+	err := db.Instance.
+		Model(&models.ChatMessageStatus{}).
+		Where("message_id = ?::uuid", messageId).
+		Where("account_id = ?::uuid", accountId).
+		Updates(&models.ChatMessageStatus{
+			Status: MessageStatusRead,
+			BaseModel: models.BaseModel{
+				UpdatedAt: time.Now(),
+			},
+		}).Error
+	if err != nil {
+		return system.E(err)
+	}
+
+	return nil
+}
+
+func (db *Storage) CreateMessage(messageModel *models.ChatMessage, opponents []models.ChatOpponent) *system.Error {
+
+	if len(messageModel.ClientMessageId) > 0 {
+		checkMessage := &models.ChatMessage{}
+		db.Instance.
+			Where("room_id = ?::uuid", messageModel.RoomId).
+			Where("client_message_id = ?", messageModel.ClientMessageId).
+			First(checkMessage)
+
+		if checkMessage.Id != uuid.Nil {
+			*messageModel = *checkMessage
+			return nil
+		}
+	}
+
+	tx := db.Instance.Begin()
+	err := tx.Create(messageModel).Error
+	if err != nil {
+		return &system.Error{Error: err}
+	}
+
+	for _, o := range opponents {
+
+		status := &models.ChatMessageStatus{
+			Id:          system.Uuid(),
+			AccountId:   o.AccountId,
+			MessageId:   messageModel.Id,
+			SubscribeId: o.SubscriberId,
+			Status:      MessageStatusRecd,
+		}
+
+		err := tx.Create(status).Error
+		if err != nil {
+			tx.Rollback()
+			return system.E(err)
+		}
+	}
+
+	err = tx.Commit().Error
+	if err != nil {
+		return &system.Error{Error: err}
+	}
+
+	return nil
 }

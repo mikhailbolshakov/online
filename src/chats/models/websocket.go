@@ -82,7 +82,7 @@ type WSChatMessageStatusRequest struct {
 }
 type WSChatMessageStatusDataRequest struct {
 	Status    string    `json:"status"`
-	ChatId    uuid.UUID `json:"chatId"`
+	RoomId    uuid.UUID `json:"roomId"`
 	MessageId uuid.UUID `json:"messageId"`
 }
 
@@ -93,7 +93,7 @@ type WSChatMessageStatusResponse struct {
 }
 type WSChatMessageStatusDataResponse struct {
 	Status    string    `json:"status"`
-	ChatId    uuid.UUID `json:"chatId"`
+	RoomId    uuid.UUID `json:"roomId"`
 	MessageId uuid.UUID `json:"messageId"`
 }
 

@@ -5,19 +5,21 @@ import (
 	"chats/models"
 	"chats/sdk"
 	"chats/server"
+	"chats/system"
 	"encoding/json"
 	"errors"
 	"github.com/gorilla/websocket"
 	uuid "github.com/satori/go.uuid"
+	"log"
 )
 
 type WSChatResponse struct {
-	Type string      `json:"type"`
+	Type string                     `json:"type"`
 	Data WSChatMessagesDataResponse `json:"data"`
 }
 type WSChatMessagesDataResponse struct {
 	Messages []models.WSChatMessagesDataMessageResponse `json:"messages"`
-	Accounts []sdk.Account `json:"accounts"`
+	Accounts []sdk.Account                              `json:"accounts"`
 }
 
 func NewChatAndSubscribe(sdkService *sdk.Sdk, accountId uuid.UUID, externalId string, referenceId string, role string) (*sdk.ChatNewResponse, error) {
@@ -66,10 +68,10 @@ func ChatSubscribe(sdkService *sdk.Sdk, chatId uuid.UUID, accountId uuid.UUID, e
 			Method: "POST",
 			Path:   "/chats/account/subscribe",
 		},
-		Body:            sdk.RoomMessageAccountSubscribeRequest{
+		Body: sdk.RoomMessageAccountSubscribeRequest{
 			AccountId: accountId,
-			RoomId: chatId,
-			Role:   role,
+			RoomId:    chatId,
+			Role:      role,
 		},
 	}
 
@@ -98,15 +100,14 @@ func ChatSubscribe(sdkService *sdk.Sdk, chatId uuid.UUID, accountId uuid.UUID, e
 func SendMessage(socket *websocket.Conn, accountId uuid.UUID, messageType string, message *models.WSChatMessageDataRequest) error {
 
 	if message.ClientMessageId == "" {
-		clientMessageId, _ := uuid.NewV4()
-		message.ClientMessageId = clientMessageId.String()
+		message.ClientMessageId = system.Uuid().String()
 	}
 
 	msgRq := &models.WSChatMessagesRequest{
 		AccountId: accountId,
 		Type:      messageType,
 		Data: models.WSChatMessagesDataRequest{
-			Messages: []models.WSChatMessageDataRequest{ *message },
+			Messages: []models.WSChatMessageDataRequest{*message},
 		},
 	}
 
@@ -122,13 +123,13 @@ func SendMessage(socket *websocket.Conn, accountId uuid.UUID, messageType string
 	return nil
 }
 
-func SendReadStatus(socket *websocket.Conn, chatId uuid.UUID, messageId uuid.UUID) error {
+func SendReadStatus(socket *websocket.Conn, roomId uuid.UUID, messageId uuid.UUID) error {
 
 	msgRq := &models.WSChatMessageStatusRequest{
-		Type:      server.EventMessageStatus,
+		Type: server.EventMessageStatus,
 		Data: models.WSChatMessageStatusDataRequest{
 			Status:    database.MessageStatusRead,
-			ChatId:    chatId,
+			RoomId:    roomId,
 			MessageId: messageId,
 		},
 	}
@@ -145,6 +146,51 @@ func SendReadStatus(socket *websocket.Conn, chatId uuid.UUID, messageId uuid.UUI
 	return nil
 }
 
+func ReadMessages(conn *websocket.Conn,
+	readChan <-chan []byte,
+	roomId uuid.UUID,
+	accountId uuid.UUID,
+	receivedChan chan interface{},
+	doneChan <-chan interface{},
+	sendReadStatus bool) {
+
+	for {
+		select {
+		case msg := <-readChan:
+			//log.Println("[First]: " + string(msg))
+			message := &WSChatResponse{}
+			_ = json.Unmarshal(msg, message)
+			for _, m := range message.Data.Messages {
+				var direct string
+				if m.AccountId == accountId {
+					direct = "send"
+				} else {
+					direct = "received"
+
+					if roomId != uuid.Nil {
+						if sendReadStatus {
+							err := SendReadStatus(conn, roomId, m.Id)
+							if err != nil {
+								log.Fatalf("Error: %v", err)
+								return
+							} else {
+								log.Printf("%s read sent \n", m.Id)
+							}
+						}
+						receivedChan <- true
+					}
+
+				}
+
+				log.Printf("%s [%s]: %s (id = %s)\n", direct, accountId, m.Text, m.Id)
+			}
+
+		case <-doneChan:
+			return
+		}
+	}
+}
+
 func GetChatInfo(sdkService *sdk.Sdk, chatId uuid.UUID, accountId uuid.UUID, externalId string) (*sdk.ChatsInfoResponse, error) {
 
 	chatInfoRq := &sdk.ChatsInfoRequest{
@@ -152,7 +198,7 @@ func GetChatInfo(sdkService *sdk.Sdk, chatId uuid.UUID, accountId uuid.UUID, ext
 			Method: "GET",
 			Path:   "/chats/info",
 		},
-		Body:            sdk.ChatsInfoRequestBody{
+		Body: sdk.ChatsInfoRequestBody{
 			Account: sdk.AccountIdRequest{
 				AccountId:  accountId,
 				ExternalId: externalId,
@@ -194,7 +240,7 @@ func GetChatsByAccount(sdkService *sdk.Sdk, accountId uuid.UUID, externalId stri
 				AccountId:  accountId,
 				ExternalId: externalId,
 			},
-			Count:   1,
+			Count: 1,
 		},
 	}
 

@@ -345,7 +345,7 @@ func (ws *WsServer) RoomUnsubscribe(request *sdk.RoomUnsubscribeRequest) (*sdk.R
 	if !accountFound {
 		return nil, &system.Error{
 			Message: fmt.Sprintf("No account %s found for room %s to unsubscribe", room.Id.String(), account.Id.String()),
-			Code: 0,
+			Code:    0,
 		}
 	}
 
@@ -406,4 +406,115 @@ func (ws *WsServer) GetRoomsByCriteria(request *sdk.GetRoomsByCriteriaRequest) (
 
 	return response, nil
 
+}
+
+func (ws *WsServer) GetMessageHistory(request *sdk.GetMessageHistoryRequest) (*sdk.GetMessageHistoryResponse, *system.Error) {
+
+	if request.Criteria.AccountId.AccountId == uuid.Nil &&
+		request.Criteria.AccountId.ExternalId == "" &&
+		request.Criteria.RoomId == uuid.Nil &&
+		request.Criteria.ReferenceId == "" {
+		return nil, &system.Error{
+			Message: "Query parameters must be more selective",
+			Code:    0,
+		}
+	}
+
+	criteria := request.Criteria
+	criteriaModel := &models.GetMessageHistoryCriteria{
+		AccountId:         criteria.AccountId.AccountId,
+		AccountExternalId: criteria.AccountId.ExternalId,
+		ReferenceId:       criteria.ReferenceId,
+		RoomId:            criteria.RoomId,
+		Statuses:          criteria.Statuses,
+		CreatedBefore:     criteria.CreatedBefore,
+		CreatedAfter:      criteria.CreatedAfter,
+		WithStatuses:      criteria.WithStatuses,
+		SentOnly:          criteria.SentOnly,
+		ReceivedOnly:      criteria.ReceivedOnly,
+		WithAccounts:      criteria.WithAccounts,
+	}
+
+	var pagingRqModel = &models.PagingRequest{
+		SortBy: []models.SortRequest{},
+	}
+	if request.PagingRequest != nil {
+		pagingRqModel.Index = request.PagingRequest.Index
+		pagingRqModel.Size = request.PagingRequest.Size
+
+		for _, s := range request.PagingRequest.SortBy {
+			pagingRqModel.SortBy = append(pagingRqModel.SortBy, models.SortRequest{
+				Field:     s.Field,
+				Direction: s.Direction,
+			})
+		}
+
+	}
+
+	if pagingRqModel.Index <= 0 {
+		pagingRqModel.Index = 1
+	}
+
+	if pagingRqModel.Size <= 1 {
+		pagingRqModel.Size = 100
+	}
+
+	items, pagingRs, accountsRs, err := ws.hub.app.DB.GetMessageHistory(criteriaModel, pagingRqModel)
+	if err != nil {
+		return nil, err
+	}
+
+	response := &sdk.GetMessageHistoryResponse{
+		Messages: []sdk.MessageHistoryItem{},
+		Accounts: []sdk.MessageAccount{},
+		Paging:   &sdk.PagingResponse{},
+		Errors:   []sdk.ErrorResponse{},
+	}
+
+	for _, item := range items {
+		message := sdk.MessageHistoryItem{
+			Id:               item.Id,
+			ClientMessageId:  item.ClientMessageId,
+			ReferenceId:      item.ReferenceId,
+			RoomId:           item.RoomId,
+			Type:             item.Type,
+			Message:          item.Message,
+			FileId:           item.FileId,
+			Params:           item.Params,
+			SenderAccountId:  item.SenderAccountId,
+			SenderExternalId: item.SenderExternalId,
+			Statuses:         []sdk.MessageStatus{},
+		}
+
+		for _, s := range item.Statuses {
+			message.Statuses = append(message.Statuses, sdk.MessageStatus{
+				AccountId:  s.AccountId,
+				Status:     s.Status,
+				StatusDate: s.StatusDate,
+			})
+		}
+
+		response.Messages = append(response.Messages, message)
+	}
+
+	for _, a := range accountsRs {
+		response.Accounts = append(response.Accounts, sdk.MessageAccount{
+			Id:         a.Id,
+			Type:       a.Type,
+			Status:     a.Status,
+			Account:    a.Account,
+			ExternalId: a.ExternalId,
+			FirstName:  a.FirstName,
+			MiddleName: a.MiddleName,
+			LastName:   a.LastName,
+			Email:      a.Email,
+			Phone:      a.Phone,
+			AvatarUrl:  a.AvatarUrl,
+		})
+	}
+
+	response.Paging.Index = pagingRs.Index
+	response.Paging.Total = pagingRs.Total
+
+	return response, nil
 }

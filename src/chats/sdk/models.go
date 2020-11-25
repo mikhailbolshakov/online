@@ -234,51 +234,6 @@ type ChatMessagesResponseDataItemTmp struct {
 	AccountId       uuid.UUID         `json:"account_id"`
 }
 
-//	Список сообщений для клиента [GET] /chats/chat/recent
-type ChatMessagesRecentRequest struct {
-	ApiRequestModel
-	Body ChatMessagesRecentRequestBody `json:"body"`
-}
-type ChatMessagesRecentRequestBody struct {
-	AccountId uuid.UUID `json:"account_id"`
-	ChatMessagesRequestBody
-}
-
-type ChatMessagesRecentResponse struct {
-	Data ChatMessagesRecentResponseData `json:"data"`
-}
-type ChatMessagesRecentResponseData struct {
-	Messages []ChatMessagesResponseDataItem `json:"messages"`
-	Accounts []Account                      `json:"accounts"`
-}
-
-//	Список истории сообщений для клиента [GET] /chats/chat/hictory (по сути тож самое что и /chats/chat/recent)
-type ChatMessagesHistoryRequest struct {
-	ApiRequestModel
-	Body ChatMessagesRecentRequestBody `json:"body"`
-}
-type ChatMessagesHistoryResponse struct {
-	Data ChatMessagesRecentResponseData `json:"data"`
-}
-
-//	Сообщение в веб-сокет для клиента
-type MessageToMobileClientRequest struct {
-	ApiRequestModel
-	Body MessageToMobileClientRequestBody `json:"body"`
-}
-type MessageToMobileClientRequestBody struct {
-	AccountId uuid.UUID         `json:"account_id"`
-	Type      string            `json:"type"`
-	Data      map[string]string `json:"data"`
-}
-
-type MessageToMobileClientResponse struct {
-	Data MessageToMobileClientResponseData `json:"data"`
-}
-type MessageToMobileClientResponseData struct {
-	Result bool `json:"result"`
-}
-
 type BoolResponseData struct {
 	Result bool `json:"result"`
 }

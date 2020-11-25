@@ -65,6 +65,7 @@ create table chat_message_statuses
   id            uuid primary key,
   message_id    uuid not null,
   subscribe_id  uuid not null,
+  account_id    uuid not null,
   status        varchar check (status in ('recd', 'read')) default 'recd' not null,
   created_at    timestamp default CURRENT_TIMESTAMP          not null,
   updated_at    timestamp default CURRENT_TIMESTAMP          not null,

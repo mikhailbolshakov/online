@@ -3,8 +3,8 @@ package sdk
 import uuid "github.com/satori/go.uuid"
 
 type AccountIdRequest struct {
-	AccountId  uuid.UUID `json:"account_id"`
-	ExternalId string    `json:"external_id"`
+	AccountId  uuid.UUID `json:"accountId"`
+	ExternalId string    `json:"externalId"`
 }
 
 type CreateAccountRequest struct {

@@ -46,7 +46,7 @@ type Error struct {
 }
 
 func E(ee error) *Error {
-	return &Error{Error: ee}
+	return &Error{Error: ee, Message: ee.Error()}
 }
 
 func MarshalError1011(err error, params []byte) *Error {

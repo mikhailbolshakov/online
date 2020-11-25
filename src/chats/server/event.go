@@ -58,10 +58,13 @@ func (e *Event) EventMessage(h *Hub, c *Session, clientRequest []byte) {
 		return
 	}
 
+	log.Printf("Handler[EventMessage]. Request: %v \n", request)
+
 	var roomId uuid.UUID
 	var messages []interface{}
 	accounts := make(map[uuid.UUID]sdk.Account)
 	var subscribers []models.RoomSubscriber
+	var sysErr = &system.Error{}
 
 	for _, item := range request.Data.Messages {
 		if len(item.Text) > maxMessageSize {
@@ -83,9 +86,9 @@ func (e *Event) EventMessage(h *Hub, c *Session, clientRequest []byte) {
 
 		if roomId == uuid.Nil {
 			roomId = item.RoomId
-			subscribers, e := h.app.DB.GetRoomSubscribers(roomId)
-			if e != nil {
-				system.ErrHandler.SetError(e)
+			subscribers, sysErr = h.app.DB.GetRoomSubscribers(roomId)
+			if sysErr != nil {
+				system.ErrHandler.SetError(sysErr)
 			}
 
 			if len(subscribers) == 0 {
@@ -100,25 +103,30 @@ func (e *Event) EventMessage(h *Hub, c *Session, clientRequest []byte) {
 		}
 
 		var subscriberId = uuid.Nil
+		var accountId = uuid.Nil
 		var subscriberType string
-		var opponentsId []uuid.UUID
+		var opponents []models.ChatOpponent
 
-		for _, subscriber := range subscribers {
-			if _, ok := accounts[subscriber.AccountId]; !ok {
+		for _, s := range subscribers {
+			if _, ok := accounts[s.AccountId]; !ok {
 
-				account, err := h.app.DB.GetAccount(subscriber.AccountId, "")
+				account, err := h.app.DB.GetAccount(s.AccountId, "")
 
 				if err != nil {
 					system.ErrHandler.SetError(err)
 					return
 				}
-				accounts[subscriber.AccountId] = *ConvertAccountFromModel(account)
+				accounts[s.AccountId] = *ConvertAccountFromModel(account)
 			}
-			if subscriber.AccountId == c.account.Id {
-				subscriberId = subscriber.Id
-				subscriberType = subscriber.Role
+			if s.AccountId == c.account.Id {
+				accountId = s.AccountId
+				subscriberId = s.Id
+				subscriberType = s.Role
 			} else {
-				opponentsId = append(opponentsId, subscriber.Id)
+				opponents = append(opponents, models.ChatOpponent{
+					SubscriberId: s.Id,
+					AccountId:    s.AccountId,
+				})
 			}
 		}
 
@@ -137,20 +145,20 @@ func (e *Event) EventMessage(h *Hub, c *Session, clientRequest []byte) {
 			system.ErrHandler.SetError(&system.Error{Error: err})
 		}
 
-		id, _ := uuid.NewV4()
 		dbMessage := &models.ChatMessage{
-			Id:              id,
+			Id:              system.Uuid(),
 			ClientMessageId: item.ClientMessageId,
-			ChatId:          roomId,
+			RoomId:          roomId,
+			AccountId:       accountId,
 			Type:            item.Type,
 			SubscribeId:     subscriberId,
 			Message:         item.Text,
 			Params:          string(paramsJson),
 		}
 
-		sentryErr := h.app.DB.NewMessageTransact(dbMessage, opponentsId)
-		if sentryErr != nil {
-			system.ErrHandler.SetError(sentryErr)
+		sysErr = h.app.DB.CreateMessage(dbMessage, opponents)
+		if sysErr != nil {
+			system.ErrHandler.SetError(sysErr)
 			return
 		}
 
@@ -187,7 +195,7 @@ func (e *Event) EventMessage(h *Hub, c *Session, clientRequest []byte) {
 		}
 	}
 
-	//	отправка обратно в веб-сокет
+	//	send back to the socket
 	if roomId != uuid.Nil {
 		clients := []sdk.Account{}
 		for _, item := range accounts {
@@ -212,6 +220,7 @@ func (e *Event) EventMessage(h *Hub, c *Session, clientRequest []byte) {
 }
 
 func (e *Event) EventMessageStatus(h *Hub, c *Session, clientRequest []byte) {
+
 	request := &models.WSChatMessageStatusRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
@@ -219,9 +228,9 @@ func (e *Event) EventMessageStatus(h *Hub, c *Session, clientRequest []byte) {
 		return
 	}
 
-	err = h.app.DB.SetReadStatus(request.Data.MessageId)
+	sysErr := h.app.DB.SetReadStatus(request.Data.MessageId, c.account.Id)
 
-	if err != nil {
+	if sysErr != nil {
 		system.ErrHandler.SetError(&system.Error{
 			Error:   err,
 			Message: WsChangeMessageStatusError,
@@ -233,12 +242,12 @@ func (e *Event) EventMessageStatus(h *Hub, c *Session, clientRequest []byte) {
 	}
 
 	response := &RoomMessage{
-		RoomId: request.Data.ChatId,
+		RoomId: request.Data.RoomId,
 		Message: &models.WSChatResponse{
 			Type: EventMessageStatus,
 			Data: models.WSChatMessageStatusDataResponse{
 				Status:    database.MessageStatusRead,
-				ChatId:    request.Data.ChatId,
+				RoomId:    request.Data.RoomId,
 				MessageId: request.Data.MessageId,
 			},
 		},
@@ -267,7 +276,7 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Session, clientRequest []byte) {
 
 		account := &models.AccountStatusModel{AccountId: subscribe.AccountId}
 
-		if c.account.Id != subscribe.AccountId && subscribe.Role != UserTypeBot {
+		if c.account.Id != subscribe.AccountId && subscribe.SystemAccount == 1 {
 
 			cronGetUserStatusRequestMessage := &models.CronGetUserStatusRequest{
 				Type: MessageTypeGetUserStatus,

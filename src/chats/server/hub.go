@@ -13,7 +13,7 @@ import (
 )
 
 type Hub struct {
-	sessions        map[string]*Session
+	sessions        map[uuid.UUID]*Session
 	accountSessions map[uuid.UUID]*Session
 	accounts        map[uuid.UUID]bool
 	rooms           map[uuid.UUID]*Room
@@ -28,8 +28,7 @@ type Hub struct {
 func NewHub(app *application.Application) *Hub {
 
 	return &Hub{
-		// WebSocket connections (key - session Id)
-		sessions:        make(map[string]*Session),
+		sessions:        make(map[uuid.UUID]*Session),
 		accountSessions: make(map[uuid.UUID]*Session),
 		accounts:        make(map[uuid.UUID]bool),
 		rooms:           make(map[uuid.UUID]*Room),
@@ -56,7 +55,7 @@ func (h *Hub) Run() {
 			log.Println(">>> session unregister:", session.account.Id) //	TODO
 			h.checkConnectionStatus(session.account.Id, false)
 		case message := <-h.messageChan:
-			log.Println(">>> message to session:", message.Message) //	TODO
+			log.Printf("Sending message to internal topic: %v \n", message.Message)
 
 			{ //	Scaling
 				answer, err := json.Marshal(message)
@@ -116,9 +115,11 @@ func (h *Hub) LoadRoomIfNotExists(roomId uuid.UUID) *Room {
 	if _, ok := h.rooms[roomId]; !ok {
 		room := InitRoom(roomId, subscribers)
 		h.rooms[roomId] = room
+		log.Printf("New room is loaded. room_id %s \n", roomId)
 		return room
 	} else {
 		h.rooms[roomId].subscribers = subscribers
+		log.Printf("Existent room is found. room_id %s \n", roomId)
 	}
 
 	return h.rooms[roomId]
@@ -208,7 +209,7 @@ func (h *Hub) clientConnectionChange(session *Session) {
 			go h.SendMessageToRoom(roomMessage)
 		}
 
-		/*for chatId, item := range session.subscribes {
+		/*for chatId, item := range session.subscribers {
 			if item.Role == database.UserTypeClient {
 				data := new(models.AccountStatusModel)
 				data.AccountId = session.account.Id

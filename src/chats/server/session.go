@@ -24,9 +24,9 @@ type Session struct {
 	hub             *Hub
 	conn            *websocket.Conn
 	sendChan        chan []byte
-	sessionId       string
+	sessionId       uuid.UUID
 	rooms           map[uuid.UUID]*Room
-	subscribes      map[uuid.UUID]models.AccountSubscriber
+	subscribers     map[uuid.UUID]models.AccountSubscriber
 	subscribesMutex sync.Mutex
 	account         *sdk.Account
 }
@@ -36,7 +36,7 @@ func InitSession(h *Hub, conn *websocket.Conn) *Session {
 		hub:        h,
 		conn:       conn,
 		sendChan:   make(chan []byte, 256),
-		sessionId:  system.Uuid().String(),
+		sessionId:  system.Uuid(),
 	}
 }
 
@@ -113,6 +113,8 @@ func (c *Session) Read() {
 
 	for {
 		messageType, message, err := c.conn.ReadMessage()
+		log.Printf("Message from socket: %v \n", string(message))
+
 		if err != nil {
 			system.ErrHandler.SetError(&system.Error{
 				Error:   err,
@@ -127,13 +129,12 @@ func (c *Session) Read() {
 			break
 		}
 
-		log.Println("message from client: ", string(message))
 		go c.hub.onMessage(message, c)
 	}
 }
 
 func (c *Session) SetSubscribers(data map[uuid.UUID]models.AccountSubscriber) {
 	c.subscribesMutex.Lock()
-	c.subscribes = data
-	c.subscribesMutex.Unlock()
+	defer c.subscribesMutex.Unlock()
+	c.subscribers = data
 }

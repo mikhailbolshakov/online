@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
-
 	"google.golang.org/grpc"
-	//"github.com/golang/protobuf/proto"
 	pb "chats/proto"
 )
 
@@ -18,12 +16,12 @@ func (ws *WsServer) Grpc() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	var opts []grpc.ServerOption
-	grpcServer := grpc.NewServer(opts...)
+	ws.grpcServer = grpc.NewServer(opts...)
 
-	registration(ws, grpcServer)
+	registration(ws, ws.grpcServer)
 
 	log.Println("Listening GRPC....")
-	err = grpcServer.Serve(lis)
+	err = ws.grpcServer.Serve(lis)
 	if err != nil {
 		system.ErrHandler.SetError(&system.Error{
 			Error: err,

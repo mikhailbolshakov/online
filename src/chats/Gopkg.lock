@@ -49,20 +49,20 @@
   version = "v1.4.3"
 
 [[projects]]
+  digest = "1:6078383dbb7405bfa3ce16957f37564e3b716afa29b6eb45ffdb6674624d1e0d"
+  name = "github.com/gorilla/mux"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "98cb6bf42e086f6af920b965c38cacc07402d51b"
+  version = "v1.8.0"
+
+[[projects]]
   digest = "1:43dd08a10854b2056e615d1b1d22ac94559d822e1f8b6fcc92c1a1057e85188e"
   name = "github.com/gorilla/websocket"
   packages = ["."]
   pruneopts = "UT"
   revision = "ea4d1f681babbce9545c9c5f3d5194a789c89f5b"
   version = "v1.2.0"
-
-[[projects]]
-  digest = "1:235ae01f32fb5f12c5f6d2e0e05ab48e651ab31c126e45a4efc4f510810941ac"
-  name = "github.com/jinzhu/gorm"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "6ed508ec6a4ecb3531899a69cbc746ccf65a4166"
-  version = "v1.9.1"
 
 [[projects]]
   branch = "master"
@@ -313,13 +313,17 @@
     "github.com/getsentry/raven-go",
     "github.com/go-redis/redis",
     "github.com/golang/protobuf/proto",
+    "github.com/gorilla/mux",
     "github.com/gorilla/websocket",
-    "github.com/jinzhu/gorm",
     "github.com/joho/godotenv",
     "github.com/nats-io/go-nats",
     "github.com/pkg/errors",
     "github.com/satori/go.uuid",
     "google.golang.org/grpc",
+    "google.golang.org/grpc/codes",
+    "google.golang.org/grpc/status",
+    "google.golang.org/protobuf/reflect/protoreflect",
+    "google.golang.org/protobuf/runtime/protoimpl",
     "gorm.io/driver/postgres",
     "gorm.io/gorm",
     "gorm.io/gorm/logger",

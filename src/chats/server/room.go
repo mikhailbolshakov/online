@@ -7,7 +7,7 @@ import (
 )
 
 type Room struct {
-	wsSessions  map[string]bool
+	wsSessions  map[uuid.UUID]bool
 	subscribers []models.AccountSubscriber
 	mutex       sync.Mutex
 	roomId      uuid.UUID
@@ -22,7 +22,7 @@ type RoomMessage struct {
 
 func InitRoom(roomId uuid.UUID, subscribers []models.AccountSubscriber) *Room {
 	return &Room{
-		wsSessions:  make(map[string]bool),
+		wsSessions:  make(map[uuid.UUID]bool),
 		subscribers: subscribers,
 		roomId:      roomId,
 	}
@@ -37,18 +37,18 @@ func (r *Room) removeSession(session *Session) {
 	}
 }
 
-func (r *Room) AddSession(sessionId string) {
+func (r *Room) AddSession(sessionId uuid.UUID) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	r.wsSessions[sessionId] = true
 }
 
-func (r *Room) getRoomSessionIds() []string {
+func (r *Room) getRoomSessionIds() []uuid.UUID {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	var sessionIds []string
+	var sessionIds []uuid.UUID
 
 	for sessionId, _ := range r.wsSessions {
 		sessionIds = append(sessionIds, sessionId)
