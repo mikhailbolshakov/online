@@ -51,6 +51,7 @@ create table chat_messages
   message           text,
   file_id           varchar,
   params 			json,
+  recipient_account_id uuid null,
   created_at        timestamp  default CURRENT_TIMESTAMP not null,
   updated_at        timestamp  default CURRENT_TIMESTAMP not null,
   deleted_at        timestamp null
@@ -59,6 +60,7 @@ create index idx_chat_msg_chat on chat_messages(room_id);
 create index idx_chat_msg_client_message on chat_messages (client_message_id);
 create index idx_chat_msg_subscr on chat_messages(subscribe_id);
 create index idx_chat_msg_acc on chat_messages(account_id);
+create index idx_chat_msg_rec_acc on chat_messages(recipient_account_id);
 
 create table chat_message_statuses
 (

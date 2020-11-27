@@ -42,7 +42,7 @@ func GetError(code int) string {
 }
 
 func GetErrorf(code int, a...interface{}) string {
-	return fmt.Sprintf(GetError(code), a)
+	return fmt.Sprintf(GetError(code) + "\n", a)
 }
 
 func MarshalError1011(err error, params []byte) *Error {
@@ -80,4 +80,5 @@ func abstractError(err *Error, code int) *Error {
 	err.Code = code
 	return err
 }
+
 

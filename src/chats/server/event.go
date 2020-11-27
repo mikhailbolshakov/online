@@ -2,12 +2,10 @@ package server
 
 import (
 	"chats/app"
-	a "chats/repository/account"
 	r "chats/repository/room"
 	"chats/system"
 	"encoding/json"
 	uuid "github.com/satori/go.uuid"
-	"time"
 )
 
 const (
@@ -35,193 +33,49 @@ func NewEvent() *Event {
 
 func (e *Event) EventMessage(h *Hub, c *Session, clientRequest []byte) {
 
-	roomRepository := r.CreateRepository(app.GetDB())
-	accountRepository := a.CreateRepository(app.GetDB())
+	defer app.E().CatchPanic("EventMessage")
 
-	loc, err := app.Instance.GetLocation()
+	clRq := &WSChatMessagesRequest{}
+	err := json.Unmarshal(clientRequest, clRq)
 	if err != nil {
-		app.E().SetError(&system.Error{
-			Error:   err,
-			Message: system.GetError(system.LoadLocationErrorCode),
-			Code:    system.LoadLocationErrorCode,
-		})
-	}
-
-	request := &WSChatMessagesRequest{}
-	err = json.Unmarshal(clientRequest, request)
-	if err != nil {
-		app.E().SetError(&system.Error{
-			Error:   err,
-			Message: system.GetError(system.UnmarshallingErrorCode),
-			Code:    system.UnmarshallingErrorCode,
-			Data:    clientRequest,
-		})
-
+		app.E().SetError(system.SysErr(err, system.UnmarshallingErrorCode, clientRequest))
 		return
 	}
 
-	app.L().Debugf("Handler[EventMessage]. Request: %v \n", request)
-
-	var roomId uuid.UUID
-	var messages []interface{}
-	accounts := make(map[uuid.UUID]Account)
-	var subscribers []r.RoomSubscriber
-	var sysErr = &system.Error{}
-
-	for _, item := range request.Data.Messages {
-		if len(item.Text) > maxMessageSize {
-			app.E().SetError(&system.Error{
-				Message: system.GetError(system.MessageTooLongErrorCode),
-				Code:    system.MessageTooLongErrorCode,
-				Data:    clientRequest,
-			})
-			return
-		}
-		if item.RoomId == uuid.Nil {
-			app.E().SetError(&system.Error{
-				Message: system.GetError(system.MysqlChatIdIncorrectCode),
-				Code:    system.MysqlChatIdIncorrectCode,
-				Data:    clientRequest,
-			})
-			return
-		}
-
-		if roomId == uuid.Nil {
-			roomId = item.RoomId
-			subscribers, sysErr = roomRepository.GetRoomSubscribers(roomId)
-			if sysErr != nil {
-				app.E().SetError(sysErr)
-			}
-
-			if len(subscribers) == 0 {
-				app.E().SetError(&system.Error{
-					Error:   err,
-					Message: system.GetError(system.MysqlChatSubscribeEmptyCode),
-					Code:    system.MysqlChatSubscribeEmptyCode,
-					Data:    clientRequest,
-				})
-				return
-			}
-		}
-
-		var subscriberId = uuid.Nil
-		var accountId = uuid.Nil
-		var subscriberType string
-		var opponents []r.ChatOpponent
-
-		for _, s := range subscribers {
-			if _, ok := accounts[s.AccountId]; !ok {
-
-				account, err := accountRepository.GetAccount(s.AccountId, "")
-
-				if err != nil {
-					app.E().SetError(err)
-					return
-				}
-				accounts[s.AccountId] = *ConvertAccountFromModel(account)
-			}
-			if s.AccountId == c.account.Id {
-				accountId = s.AccountId
-				subscriberId = s.Id
-				subscriberType = s.Role
-			} else {
-				opponents = append(opponents, r.ChatOpponent{
-					SubscriberId: s.Id,
-					AccountId:    s.AccountId,
-				})
-			}
-		}
-
-		if subscriberId == uuid.Nil {
-			app.E().SetError(&system.Error{
-				Error:   err,
-				Message: system.GetError(system.MysqlChatAccessDeniedCode),
-				Code:    system.MysqlChatAccessDeniedCode,
-				Data:    clientRequest,
-			})
-			return
-		}
-
-		paramsJson, err := json.Marshal(item.Params)
-		if err != nil {
-			app.E().SetError(&system.Error{Error: err})
-		}
-
-		dbMessage := &r.ChatMessage{
-			Id:              system.Uuid(),
-			ClientMessageId: item.ClientMessageId,
-			RoomId:          roomId,
-			AccountId:       accountId,
-			Type:            item.Type,
-			SubscribeId:     subscriberId,
-			Message:         item.Text,
-			Params:          string(paramsJson),
-		}
-
-		sysErr = roomRepository.CreateMessage(dbMessage, opponents)
-		if sysErr != nil {
-			app.E().SetError(sysErr)
-			return
-		}
-
-		tmpMessageResponse := &WSChatMessagesDataMessageResponse{
-			Id:              dbMessage.Id,
-			ClientMessageId: item.ClientMessageId,
-			InsertDate:      dbMessage.CreatedAt.In(loc).Format(time.RFC3339),
-			ChatId:          roomId,
-			AccountId:       c.account.Id,
-			Sender:          subscriberType,
-			Status:          r.MessageStatusRecd,
-			Type:            item.Type,
-			Text:            item.Text,
-		}
-		if len(dbMessage.FileId) > 0 {
-			//file := &FileModel{Id: dbMessage.FileId}
-			//sdkErr := h.inf.Nats.File(file, roomId, c.account.Id)
-			//if sdkErr != nil {
-			//	app.E().SetError(&system.Error{
-			//		Error:   sdkErr.Error,
-			//		Message: sdkErr.Message,
-			//		Code:    sdkErr.Code,
-			//		Data:    sdkErr.Data,
-			//	})
-			//	return
-			//}
-			tmpMessageResponseData := &WSChatMessagesDataMessageFileResponse{
-				WSChatMessagesDataMessageResponse: *tmpMessageResponse,
-				//File:                              nil,
-			}
-			messages = append(messages, tmpMessageResponseData)
-		} else {
-			messages = append(messages, tmpMessageResponse)
-		}
+	request := &SendChatMessagesRequest{
+		Type:            clRq.Type,
+		Data:            SendChatMessagesDataRequest{
+			Messages: []SendChatMessageDataRequest{},
+		},
 	}
 
-	//	send back to the socket
-	if roomId != uuid.Nil {
-		clients := []Account{}
-		for _, item := range accounts {
-			clients = append(clients, item)
-		}
-
-		responseMessage := &WSChatResponse{
-			Type: EventMessage,
-			Data: WSChatMessagesDataResponse{
-				Messages: messages,
-				Accounts: clients,
-			},
-		}
-
-		response := &RoomMessage{
-			RoomId:  roomId,
-			Message: responseMessage,
-		}
-
-		h.SendMessageToRoom(response)
+	if clRq.SenderAccountId != uuid.Nil {
+		request.SenderAccountId = clRq.SenderAccountId
+	} else {
+		request.SenderAccountId = c.account.Id
 	}
+
+	for _, m := range clRq.Data.Messages {
+		request.Data.Messages = append(request.Data.Messages, SendChatMessageDataRequest{
+			ClientMessageId:    m.ClientMessageId,
+			RoomId:             m.RoomId,
+			Type:               m.Type,
+			Text:               m.Text,
+			Params:             m.Params,
+			RecipientAccountId: m.RecipientAccountId,
+		})
+	}
+
+	_, srvErr := wsServer.SendChatMessages(request)
+	if srvErr != nil {
+		app.E().SetError(srvErr)
+	}
+
 }
 
 func (e *Event) EventMessageStatus(h *Hub, c *Session, clientRequest []byte) {
+
+	defer app.E().CatchPanic("EventMessageStatus")
 
 	request := &WSChatMessageStatusRequest{}
 	err := json.Unmarshal(clientRequest, request)
@@ -255,6 +109,8 @@ func (e *Event) EventMessageStatus(h *Hub, c *Session, clientRequest []byte) {
 
 func (e *Event) EventOpponentStatus(h *Hub, c *Session, clientRequest []byte) {
 
+	defer app.E().CatchPanic("EventOpponentStatus")
+
 	rep := r.CreateRepository(app.GetDB())
 
 	request := &WSChatOpponentStatusRequest{}
@@ -276,7 +132,7 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Session, clientRequest []byte) {
 
 		account := &WSAccountStatusModel{AccountId: subscribe.AccountId}
 
-		if c.account.Id != subscribe.AccountId && subscribe.SystemAccount == 1 {
+		if c.account.Id != subscribe.AccountId && !system.Uint8ToBool(subscribe.SystemAccount) {
 
 			cronGetUserStatusRequestMessage := &CronGetUserStatusRequest{
 				Type: MessageTypeGetUserStatus,
@@ -296,12 +152,7 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Session, clientRequest []byte) {
 				Request(request)
 
 			if cronRequestError != nil {
-				app.E().SetError(&system.Error{
-					Error:   cronRequestError.Error,
-					Message: system.GetError(system.CronResponseErrorCode),
-					Code:    system.CronResponseErrorCode,
-					Data:    append(request, response...),
-				})
+				app.E().SetError(system.SysErr(cronRequestError.Error, system.CronResponseErrorCode, append(request, response...)))
 				return
 			}
 
@@ -339,6 +190,9 @@ func (e *Event) EventOpponentStatus(h *Hub, c *Session, clientRequest []byte) {
 }
 
 func (e *Event) EventJoin(h *Hub, c *Session, clientRequest []byte) {
+
+	defer app.E().CatchPanic("EventJoin")
+
 	request := &WSChatJoinRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
@@ -352,6 +206,9 @@ func (e *Event) EventJoin(h *Hub, c *Session, clientRequest []byte) {
 }
 
 func (e *Event) EventTyping(h *Hub, c *Session, clientRequest []byte) {
+
+	defer app.E().CatchPanic("EventTyping")
+
 	request := &WSChatTypingRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {
@@ -388,6 +245,9 @@ func (e *Event) EventTyping(h *Hub, c *Session, clientRequest []byte) {
 }
 
 func (e *Event) EventEcho(h *Hub, c *Session, clientRequest []byte) {
+
+	defer app.E().CatchPanic("EventEcho")
+
 	request := &WSChatEchoRequest{}
 	err := json.Unmarshal(clientRequest, request)
 	if err != nil {

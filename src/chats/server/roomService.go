@@ -2,12 +2,14 @@ package server
 
 import (
 	"chats/app"
+	"chats/repository"
 	a "chats/repository/account"
 	r "chats/repository/room"
-	"chats/repository"
 	"chats/system"
+	"encoding/json"
 	"fmt"
 	uuid "github.com/satori/go.uuid"
+	"time"
 )
 
 func (ws *WsServer) sendRoomSubscribeMessage(roomId uuid.UUID, accountId uuid.UUID, role string) {
@@ -48,6 +50,8 @@ func (ws *WsServer) sendRoomUnsubscribeMessage(roomId uuid.UUID, accountId uuid.
 
 func (ws *WsServer) CreateRoom(request *CreateRoomRequest) (*CreateRoomResponse, *system.Error) {
 
+	defer app.E().CatchPanic("CreateRoom")
+
 	accRep := a.CreateRepository(app.GetDB())
 	roomRep := r.CreateRepository(app.GetDB())
 
@@ -84,7 +88,7 @@ func (ws *WsServer) CreateRoom(request *CreateRoomRequest) (*CreateRoomResponse,
 			RoomId:        roomModel.Id,
 			AccountId:     account.Id,
 			Role:          s.Role,
-			SystemAccount: system.BoolToUint8(false),
+			SystemAccount: system.BoolToUint8(s.AsSystemAccount),
 		})
 
 		accountIds = append(accountIds, account.Id)
@@ -121,6 +125,8 @@ func (ws *WsServer) CreateRoom(request *CreateRoomRequest) (*CreateRoomResponse,
 
 func (ws *WsServer) CloseRoomsByAccounts(accountIds []uuid.UUID) *system.Error {
 
+	defer app.E().CatchPanic("CloseRoomsByAccounts")
+
 	roomRep := r.CreateRepository(app.GetDB())
 
 	roomIds, err := roomRep.CloseRoomsByAccounts(accountIds)
@@ -140,6 +146,8 @@ func (ws *WsServer) CloseRoomsByAccounts(accountIds []uuid.UUID) *system.Error {
 }
 
 func (ws *WsServer) CloseRoom(request *CloseRoomRequest) (*CloseRoomResponse, *system.Error) {
+
+	defer app.E().CatchPanic("CloseRoom")
 
 	roomRep := r.CreateRepository(app.GetDB())
 
@@ -178,6 +186,8 @@ func (ws *WsServer) CloseRoom(request *CloseRoomRequest) (*CloseRoomResponse, *s
 }
 
 func (ws *WsServer) RoomSubscribe(request *RoomSubscribeRequest) (*RoomSubscribeResponse, *system.Error) {
+
+	defer app.E().CatchPanic("RoomSubscribe")
 
 	roomRep := r.CreateRepository(app.GetDB())
 	accRep := a.CreateRepository(app.GetDB())
@@ -256,14 +266,20 @@ func (ws *WsServer) RoomSubscribe(request *RoomSubscribeRequest) (*RoomSubscribe
 		}
 
 		if !accountFound {
+
+			// close previous rooms for the account
+			err := ws.CloseRoomsByAccounts([]uuid.UUID{account.Id})
+			if err != nil {
+				return nil, err
+			}
+
 			// add subscriber to DB
 			subscriber := r.RoomSubscriber{
-				Id:        system.Uuid(),
-				RoomId:    room.Id,
-				AccountId: account.Id,
-				Role:      subscribeRq.Role,
-				// TODO: add attr SystemAccount to account
-				SystemAccount: system.BoolToUint8(false),
+				Id:            system.Uuid(),
+				RoomId:        room.Id,
+				AccountId:     account.Id,
+				Role:          subscribeRq.Role,
+				SystemAccount: system.BoolToUint8(subscribeRq.AsSystemAccount),
 			}
 
 			room.Subscribers = append(room.Subscribers, subscriber)
@@ -287,85 +303,89 @@ func (ws *WsServer) RoomSubscribe(request *RoomSubscribeRequest) (*RoomSubscribe
 
 func (ws *WsServer) RoomUnsubscribe(request *RoomUnsubscribeRequest) (*RoomUnsubscribeResponse, *system.Error) {
 
+	defer app.E().CatchPanic("RoomUnsubscribe")
+
+	response := &RoomUnsubscribeResponse{
+		Errors: []ErrorResponse{},
+	}
+
+	app.L().Debugf("Room unsubscribe. Request %v:", *request)
+
 	roomRep := r.CreateRepository(app.GetDB())
 	accRep := a.CreateRepository(app.GetDB())
 
 	// get the room
-	var room = &r.Room{}
+	var rooms []r.Room
 	var err = &system.Error{}
 	if request.RoomId != uuid.Nil {
+
 		// search bu Id if provided
-		room, err = roomRep.GetRoom(request.RoomId)
+		room, err := roomRep.GetRoom(request.RoomId)
 		if err != nil {
 			return nil, err
 		}
+
+		if room != nil {
+			rooms = append(rooms, *room)
+			app.L().Debugf("Room unsubscribe. Room found %s by roomId.", room.Id.String())
+		} else {
+			return nil, system.SysErrf(nil, system.NoRoomFoundByIdCode, nil, request.RoomId.String())
+		}
+
 	} else if request.ReferenceId != "" {
 		// search by Reference Id if provided
-		rs, err := roomRep.GetRooms(&r.GetRoomCriteria{ReferenceId: request.ReferenceId, WithSubscribers: true})
+		rooms, err = roomRep.GetRooms(&r.GetRoomCriteria{ReferenceId: request.ReferenceId, WithSubscribers: true})
 		if err != nil {
 			return nil, err
 		}
-		// set if found
-		if len(rs) > 0 {
-			room = &rs[0]
+
+		if len(rooms) == 0 {
+			return nil, system.SysErrf(nil, system.NoRoomFoundByReferenceCode, nil, request.ReferenceId)
 		}
+
+		app.L().Debugf("Room unsubscribe. %d room(s) found by referenceId %s", len(rooms), request.ReferenceId)
+
 	} else {
-		return nil, &system.Error{
-			Message: "Identifiers of a room isn't provided",
-			Code:    0,
-		}
+		return nil, system.SysErr(nil, system.IncorrectRequestCode, nil)
 	}
 
-	// check if room found
-	if room.Id == uuid.Nil {
-		return nil, &system.Error{
-			Message: fmt.Sprintf("GetRoom %s isn't found", request.RoomId.String()),
-			Code:    0,
-		}
-	}
-
-	// check if room isn't closed
-	if room.ClosedAt != nil {
-		return nil, &system.Error{
-			Message: fmt.Sprintf("GetRoom %s closed", request.RoomId.String()),
-			Code:    0,
-		}
-	}
-
+	// get account
 	account, err := accRep.GetAccount(request.AccountId.AccountId, request.AccountId.ExternalId)
 	if err != nil {
 		return nil, err
 	}
 
-	accountFound := false
+	// go through all rooms
+	for _, room := range rooms {
 
-	// go through requested subscribers
-	for _, subscriber := range room.Subscribers {
+		// check if room isn't closed
+		if room.ClosedAt != nil {
+			return nil, system.SysErr(nil, system.RoomAlreadyClosedCode, []byte(request.RoomId.String()))
+		}
 
-		if subscriber.AccountId == account.Id {
+		accountFound := false
 
-			accountFound = true
+		// go through requested subscribers
+		for _, subscriber := range room.Subscribers {
 
-			err := roomRep.RoomUnsubscribeAccount(room.Id, account.Id)
-			if err != nil {
-				return nil, err
+			if subscriber.AccountId == account.Id {
+
+				accountFound = true
+
+				err := roomRep.RoomUnsubscribeAccount(room.Id, account.Id)
+				if err != nil {
+					return nil, err
+				}
+
+				go ws.sendRoomUnsubscribeMessage(room.Id, account.Id)
+
 			}
 
-			go ws.sendRoomUnsubscribeMessage(room.Id, account.Id)
-
 		}
 
-	}
-
-	if !accountFound {
-		return nil, &system.Error{
-			Message: fmt.Sprintf("No account %s found for room %s to unsubscribe", room.Id.String(), account.Id.String()),
-			Code:    0,
+		if !accountFound {
+			return nil, system.SysErrf(nil, system.NotSubscribedAccountCode, nil, room.Id.String(), account.Id.String())
 		}
-	}
-
-	response := &RoomUnsubscribeResponse{
-		Errors: []ErrorResponse{},
 	}
 
 	return response, nil
@@ -373,6 +393,8 @@ func (ws *WsServer) RoomUnsubscribe(request *RoomUnsubscribeRequest) (*RoomUnsub
 }
 
 func (ws *WsServer) GetRoomsByCriteria(request *GetRoomsByCriteriaRequest) (*GetRoomsByCriteriaResponse, *system.Error) {
+
+	defer app.E().CatchPanic("GetRoomsByCriteria")
 
 	roomRep := r.CreateRepository(app.GetDB())
 
@@ -426,6 +448,8 @@ func (ws *WsServer) GetRoomsByCriteria(request *GetRoomsByCriteriaRequest) (*Get
 }
 
 func (ws *WsServer) GetMessageHistory(request *GetMessageHistoryRequest) (*GetMessageHistoryResponse, *system.Error) {
+
+	defer app.E().CatchPanic("GetMessageHistory")
 
 	roomRep := r.CreateRepository(app.GetDB())
 
@@ -492,17 +516,17 @@ func (ws *WsServer) GetMessageHistory(request *GetMessageHistoryRequest) (*GetMe
 
 	for _, item := range items {
 		message := MessageHistoryItem{
-			Id:               item.Id,
-			ClientMessageId:  item.ClientMessageId,
-			ReferenceId:      item.ReferenceId,
-			RoomId:           item.RoomId,
-			Type:             item.Type,
-			Message:          item.Message,
-			FileId:           item.FileId,
-			Params:           item.Params,
-			SenderAccountId:  item.SenderAccountId,
-			SenderExternalId: item.SenderExternalId,
-			Statuses:         []MessageStatus{},
+			Id:                 item.Id,
+			ClientMessageId:    item.ClientMessageId,
+			ReferenceId:        item.ReferenceId,
+			RoomId:             item.RoomId,
+			Type:               item.Type,
+			Message:            item.Message,
+			FileId:             item.FileId,
+			Params:             item.Params,
+			SenderAccountId:    item.SenderAccountId,
+			RecipientAccountId: item.RecipientAccountId,
+			Statuses:           []MessageStatus{},
 		}
 
 		for _, s := range item.Statuses {
@@ -536,4 +560,254 @@ func (ws *WsServer) GetMessageHistory(request *GetMessageHistoryRequest) (*GetMe
 	response.Paging.Total = pagingRs.Total
 
 	return response, nil
+}
+
+func (ws *WsServer) SendChatMessages(request *SendChatMessagesRequest) (*SendChatMessageResponse, *system.Error) {
+
+	defer app.E().CatchPanic("SendChatMessages")
+
+	response := &SendChatMessageResponse{}
+
+	app.L().Debugf("Chat message sending. Request: %s", request)
+	rqJson, _ := json.Marshal(request)
+
+	roomRepository := r.CreateRepository(app.GetDB())
+	accountRepository := a.CreateRepository(app.GetDB())
+
+	loc, err := app.Instance.GetLocation()
+	if err != nil {
+		return nil, system.SysErr(err, system.LoadLocationErrorCode, nil)
+	}
+
+	var roomId uuid.UUID
+	recipients := make(map[uuid.UUID]Account)
+	var subscribers []r.RoomSubscriber
+	var sysErr = &system.Error{}
+
+	for _, item := range request.Data.Messages {
+		if len(item.Text) > maxMessageSize {
+			return nil, system.SysErr(err, system.MessageTooLongErrorCode, rqJson)
+		}
+		if item.RoomId == uuid.Nil {
+			return nil, system.SysErr(err, system.MysqlChatIdIncorrectCode, rqJson)
+		}
+
+		if roomId == uuid.Nil {
+			roomId = item.RoomId
+			subscribers, sysErr = roomRepository.GetRoomSubscribers(roomId)
+			if sysErr != nil {
+				return nil, sysErr
+			}
+
+			if len(subscribers) == 0 {
+				return nil, system.SysErr(err, system.MysqlChatSubscribeEmptyCode, rqJson)
+			}
+		}
+
+		var senderSubscriberId = uuid.Nil
+		var senderAccountId = uuid.Nil
+		var senderSubscriberType string
+		var opponents []r.ChatOpponent
+
+		for _, s := range subscribers {
+
+			// add to list recipients all the accounts (including sender) except system account (bot)
+			if _, ok := recipients[s.AccountId]; !ok && !system.Uint8ToBool(s.SystemAccount) {
+
+				account, err := accountRepository.GetAccount(s.AccountId, "")
+				if err != nil {
+					return nil, err
+				}
+				recipients[s.AccountId] = *ConvertAccountFromModel(account)
+			}
+
+			if s.AccountId == request.SenderAccountId {
+				senderAccountId = s.AccountId
+				senderSubscriberId = s.Id
+				senderSubscriberType = s.Role
+			} else {
+				opponents = append(opponents, r.ChatOpponent{
+					SubscriberId:  s.Id,
+					AccountId:     s.AccountId,
+					SystemAccount: system.Uint8ToBool(s.SystemAccount),
+				})
+			}
+		}
+
+		if senderSubscriberId == uuid.Nil {
+			return nil, system.SysErr(err, system.MysqlChatAccessDeniedCode, rqJson)
+		}
+
+		if item.RecipientAccountId != uuid.Nil {
+			if _, ok := recipients[item.RecipientAccountId]; !ok {
+				return nil, system.SysErr(err, system.PrivateChatRecipientNotFoundAmongSubscribersCode, rqJson)
+			}
+		}
+
+		paramsJson, err := json.Marshal(item.Params)
+		if err != nil {
+			return nil, system.SysErr(err, system.UnmarshallingErrorCode, nil)
+		}
+
+		dbMessage := &r.ChatMessage{
+			Id:              system.Uuid(),
+			ClientMessageId: item.ClientMessageId,
+			RoomId:          roomId,
+			AccountId:       senderAccountId,
+			Type:            item.Type,
+			SubscribeId:     senderSubscriberId,
+			Message:         item.Text,
+			Params:          string(paramsJson),
+		}
+		if item.RecipientAccountId != uuid.Nil {
+			dbMessage.RecipientAccountId = &item.RecipientAccountId
+		}
+
+		sysErr = roomRepository.CreateMessage(dbMessage, opponents)
+		if sysErr != nil {
+			return nil, sysErr
+		}
+
+		messageResponse := &WSChatMessagesDataMessageResponse{
+			Id:                 dbMessage.Id,
+			ClientMessageId:    item.ClientMessageId,
+			InsertDate:         dbMessage.CreatedAt.In(loc).Format(time.RFC3339),
+			ChatId:             roomId,
+			AccountId:          request.SenderAccountId,
+			Sender:             senderSubscriberType,
+			Status:             r.MessageStatusRecd,
+			Type:               item.Type,
+			Text:               item.Text,
+			RecipientAccountId: item.RecipientAccountId,
+			Params:             item.Params,
+		}
+
+		//if len(dbMessage.FileId) > 0 {
+		//	//file := &FileModel{Id: dbMessage.FileId}
+		//	//sdkErr := h.inf.Nats.File(file, roomId, c.account.Id)
+		//	//if sdkErr != nil {
+		//	//	app.E().SetError(&system.Error{
+		//	//		Error:   sdkErr.Error,
+		//	//		Message: sdkErr.Message,
+		//	//		Code:    sdkErr.Code,
+		//	//		Data:    sdkErr.Data,
+		//	//	})
+		//	//	return
+		//	//}
+		//	messageResponseData := &WSChatMessagesDataMessageFileResponse{
+		//		WSChatMessagesDataMessageResponse: *messageResponse,
+		//		//File:                              nil,
+		//	}
+		//	messages = append(messages, messageResponseData)
+		//} else {
+		//	messages = append(messages, messageResponse)
+		//}
+
+		if messageResponse.RecipientAccountId != uuid.Nil {
+
+			rsMsg := &RoomMessage{
+				RoomId:    uuid.Nil,
+				AccountId: messageResponse.RecipientAccountId,
+				Message: &WSChatResponse{
+					Type: EventMessage,
+					Data: WSChatMessagesDataResponse{
+						Messages: []interface{}{messageResponse},
+						Accounts: []Account{recipients[messageResponse.RecipientAccountId]},
+					},
+				},
+			}
+
+			// send to internal NATS topic for balancing
+			ws.hub.SendMessageToRoom(rsMsg)
+
+		} else {
+
+			var recipientAccounts []Account
+			for _, item := range recipients {
+				recipientAccounts = append(recipientAccounts, item)
+			}
+
+			rsMsg := &RoomMessage{
+				RoomId: roomId,
+				Message: &WSChatResponse{
+					Type: EventMessage,
+					Data: WSChatMessagesDataResponse{
+						Messages: []interface{}{messageResponse},
+						Accounts: recipientAccounts,
+					},
+				},
+			}
+
+			// send to internal NATS topic for balancing
+			ws.hub.SendMessageToRoom(rsMsg)
+
+		}
+
+	}
+
+	return response, nil
+}
+
+func (ws *WsServer) resendRecdMessagesToSession(session *Session, roomId uuid.UUID) {
+
+	defer app.E().CatchPanic("resendRecdMessagesToSession")
+
+	loc, e := app.Instance.GetLocation()
+	if e != nil {
+		system.SysErr(e, system.LoadLocationErrorCode, nil)
+	}
+
+	roomRepository := r.CreateRepository(app.GetDB())
+
+	messages, err := roomRepository.GetAccountRecdMessages(session.account.Id, roomId)
+	if err != nil {
+		app.E().SetError(err)
+	}
+
+	if len(messages) > 0 {
+		app.L().Debugf("Messages to resend found: %s", len(messages))
+		for _, m := range messages {
+
+			jsonParams := make(map[string]string)
+			if m.Params != "" {
+				err := json.Unmarshal([]byte(m.Params), &jsonParams)
+				if err != nil {
+					app.E().SetError(system.E(err))
+				}
+			}
+
+			var recipientAccountId uuid.UUID
+			if m.RecipientAccountId != nil {
+				recipientAccountId = *m.RecipientAccountId
+			}
+
+			msg := &WSChatResponse{
+				Type: EventMessage,
+				Data: WSChatMessagesDataResponse{
+					Messages: []interface{}{
+						&WSChatMessagesDataMessageResponse{
+							Id:                 m.Id,
+							ClientMessageId:    m.ClientMessageId,
+							InsertDate:         m.CreatedAt.In(loc).Format(time.RFC3339),
+							ChatId:             roomId,
+							AccountId:          m.AccountId,
+							Status:             r.MessageStatusRecd,
+							Type:               m.Type,
+							Text:               m.Message,
+							RecipientAccountId: recipientAccountId,
+							Params:             jsonParams,
+						}},
+				},
+			}
+
+			msgMar, e := json.Marshal(msg)
+			if e != nil {
+				app.E().SetError(err)
+			}
+
+			app.L().Debugf("Resending message to session. accountId: %s, msg: %s", session.account.Id, string(msgMar))
+			go ws.hub.sendMessage(session, msgMar)
+		}
+	}
+
 }

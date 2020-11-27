@@ -1,6 +1,9 @@
 package app
 
-import "log"
+import (
+	"encoding/json"
+	"log"
+)
 
 const (
 	llDebug = "DEBUG"
@@ -40,7 +43,7 @@ func (l *LogHandler) Info(m...interface{}){
 
 func (l *LogHandler) Infof(m string, a...interface{}){
 	if l.Level == llInfo || l.Level == llDebug {
-		log.Printf(m, a)
+		log.Printf(m + "\n", a)
 	}
 }
 
@@ -51,8 +54,16 @@ func (l *LogHandler) Debug(m...interface{}){
 }
 
 func (l *LogHandler) Debugf(m string, a...interface{}){
+
+	var params []interface{}
+
+	for _, i := range a {
+		s, _ := json.MarshalIndent(i, "", "\t")
+		params = append(params, s)
+	}
+
 	if l.Level == llDebug {
-		log.Printf(m, a)
+		log.Printf(m + "\n", params)
 	}
 }
 

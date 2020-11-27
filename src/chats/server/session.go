@@ -54,19 +54,26 @@ func (c *Session) send(message []byte) {
 }
 
 func (c *Session) Write() {
+
 	pingTicker := time.NewTicker(pingPeriod)
+
 	defer func() {
+		// close connection
 		pingTicker.Stop()
 		c.conn.Close()
+
+		app.L().Debugf("Websocket has been closed for account %s", c.account.Id)
+
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.sendChan:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 
 			if !ok {
-				app.L().Debug("Хаб закрыл канал", c.account.Id) //	TODO
+				app.L().Debugf("Channel has been closed for account %s", c.account.Id)
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
@@ -76,12 +83,13 @@ func (c *Session) Write() {
 				return
 			}
 
-			app.L().Debug("message to client: ", string(message)) //	TODO
+			app.L().Debug("message to client: ", string(message))
 
 			writer.Write(message)
 			if err := writer.Close(); err != nil {
 				return
 			}
+
 		case <-pingTicker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
@@ -93,7 +101,7 @@ func (c *Session) Write() {
 
 func (c *Session) Read() {
 	defer func() {
-		app.L().Debug("Отключаем клиента", c.account.Id) //	TODO
+		app.L().Debugf("Websocket client is closing (accountId: %s)", c.account.Id.String())
 		c.hub.unregisterChan <- c
 		c.conn.Close()
 	}()
@@ -107,13 +115,13 @@ func (c *Session) Read() {
 
 	for {
 		_, message, err := c.conn.ReadMessage()
-		app.L().Debugf("Message from socket: %v \n", string(message))
+		app.L().Debugf("Message from socket: %s", string(message))
 
 		if err != nil {
 			app.E().SetError(system.SysErr(err, system.WsConnReadMessageErrorCode, message))
-			app.L().Debug(">>>>>> ReadMessageError:", err) //	TODO
+			app.L().Debug(">>>>>> ReadMessageError:", err)
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				app.L().Debugf("> > > Read sentry: %v", err) 	 //	TODO
+				app.L().Debugf("> > > Read sentry: %s", err)
 			}
 			break
 		}
@@ -127,3 +135,5 @@ func (c *Session) SetSubscribers(data map[uuid.UUID]r.AccountSubscriber) {
 	defer c.subscribesMutex.Unlock()
 	c.subscribers = data
 }
+
+

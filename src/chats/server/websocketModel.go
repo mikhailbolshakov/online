@@ -4,7 +4,6 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
-
 // TODO: remove relations to sdk
 
 //	request default
@@ -35,9 +34,9 @@ type WSChatErrorErrorResponse struct {
 
 //	message request
 type WSChatMessagesRequest struct {
-	AccountId uuid.UUID                 `json:"account_id"`
-	Type      string                    `json:"type"`
-	Data      WSChatMessagesDataRequest `json:"data"`
+	SenderAccountId uuid.UUID                 `json:"senderAccountId"`
+	Type            string                    `json:"type"`
+	Data            WSChatMessagesDataRequest `json:"data"`
 }
 
 type WSChatMessagesDataRequest struct {
@@ -45,11 +44,12 @@ type WSChatMessagesDataRequest struct {
 }
 
 type WSChatMessageDataRequest struct {
-	ClientMessageId string            `json:"clientMessageId"`
-	RoomId          uuid.UUID         `json:"roomId"`
-	Type            string            `json:"type"`
-	Text            string            `json:"text"`
-	Params          map[string]string `json:"params"`
+	ClientMessageId    string            `json:"clientMessageId"`
+	RoomId             uuid.UUID         `json:"roomId"`
+	Type               string            `json:"type"`
+	Text               string            `json:"text"`
+	Params             map[string]string `json:"params"`
+	RecipientAccountId uuid.UUID        `json:"recipientAccountId"`
 }
 
 //	message response
@@ -58,16 +58,17 @@ type WSChatMessagesDataResponse struct {
 	Accounts []Account     `json:"accounts"`
 }
 type WSChatMessagesDataMessageResponse struct {
-	Id              uuid.UUID         `json:"id"`
-	ClientMessageId string            `json:"clientMessageId"`
-	InsertDate      string            `json:"insertDate"`
-	ChatId          uuid.UUID         `json:"chatId"`
-	AccountId       uuid.UUID         `json:"accountId"`
-	Sender          string            `json:"sender"`
-	Status          string            `json:"status"`
-	Type            string            `json:"type"`
-	Text            string            `json:"text"`
-	Params          map[string]string `json:"params"`
+	Id                 uuid.UUID         `json:"id"`
+	ClientMessageId    string            `json:"clientMessageId"`
+	InsertDate         string            `json:"insertDate"`
+	ChatId             uuid.UUID         `json:"chatId"`
+	AccountId          uuid.UUID         `json:"accountId"`
+	Sender             string            `json:"sender"`
+	Status             string            `json:"status"`
+	Type               string            `json:"type"`
+	Text               string            `json:"text"`
+	Params             map[string]string `json:"params"`
+	RecipientAccountId uuid.UUID        `json:"recipientAccountId"`
 }
 type WSChatMessagesDataMessageFileResponse struct {
 	WSChatMessagesDataMessageResponse
@@ -122,7 +123,7 @@ type WSChatJoinRequest struct {
 }
 
 type WSChatJoinDataRequest struct {
-	ConsultationId string `json:"consultationId"`
+	ReferenceId string `json:"referenceId"`
 }
 
 //	typing request

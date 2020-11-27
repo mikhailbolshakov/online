@@ -13,7 +13,7 @@ import (
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion7
 
-// RoomClient is the client API for GetRoom service.
+// RoomClient is the client API for Room service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RoomClient interface {
@@ -21,6 +21,8 @@ type RoomClient interface {
 	Subscribe(ctx context.Context, in *RoomSubscribeRequest, opts ...grpc.CallOption) (*RoomSubscribeResponse, error)
 	GetByCriteria(ctx context.Context, in *GetRoomsByCriteriaRequest, opts ...grpc.CallOption) (*GetRoomsByCriteriaResponse, error)
 	CloseRoom(ctx context.Context, in *CloseRoomRequest, opts ...grpc.CallOption) (*CloseRoomResponse, error)
+	SendChatMessages(ctx context.Context, in *SendChatMessagesRequest, opts ...grpc.CallOption) (*SendChatMessageResponse, error)
+	Unsubscribe(ctx context.Context, in *RoomUnsubscribeRequest, opts ...grpc.CallOption) (*RoomUnsubscribeResponse, error)
 }
 
 type roomClient struct {
@@ -33,7 +35,7 @@ func NewRoomClient(cc grpc.ClientConnInterface) RoomClient {
 
 func (c *roomClient) Create(ctx context.Context, in *CreateRoomRequest, opts ...grpc.CallOption) (*CreateRoomResponse, error) {
 	out := new(CreateRoomResponse)
-	err := c.cc.Invoke(ctx, "/proto.GetRoom/Create", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/proto.Room/Create", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +44,7 @@ func (c *roomClient) Create(ctx context.Context, in *CreateRoomRequest, opts ...
 
 func (c *roomClient) Subscribe(ctx context.Context, in *RoomSubscribeRequest, opts ...grpc.CallOption) (*RoomSubscribeResponse, error) {
 	out := new(RoomSubscribeResponse)
-	err := c.cc.Invoke(ctx, "/proto.GetRoom/Subscribe", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/proto.Room/Subscribe", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +53,7 @@ func (c *roomClient) Subscribe(ctx context.Context, in *RoomSubscribeRequest, op
 
 func (c *roomClient) GetByCriteria(ctx context.Context, in *GetRoomsByCriteriaRequest, opts ...grpc.CallOption) (*GetRoomsByCriteriaResponse, error) {
 	out := new(GetRoomsByCriteriaResponse)
-	err := c.cc.Invoke(ctx, "/proto.GetRoom/GetByCriteria", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/proto.Room/GetByCriteria", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -60,14 +62,32 @@ func (c *roomClient) GetByCriteria(ctx context.Context, in *GetRoomsByCriteriaRe
 
 func (c *roomClient) CloseRoom(ctx context.Context, in *CloseRoomRequest, opts ...grpc.CallOption) (*CloseRoomResponse, error) {
 	out := new(CloseRoomResponse)
-	err := c.cc.Invoke(ctx, "/proto.GetRoom/CloseRoom", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/proto.Room/CloseRoom", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// RoomServer is the server API for GetRoom service.
+func (c *roomClient) SendChatMessages(ctx context.Context, in *SendChatMessagesRequest, opts ...grpc.CallOption) (*SendChatMessageResponse, error) {
+	out := new(SendChatMessageResponse)
+	err := c.cc.Invoke(ctx, "/proto.Room/SendChatMessages", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *roomClient) Unsubscribe(ctx context.Context, in *RoomUnsubscribeRequest, opts ...grpc.CallOption) (*RoomUnsubscribeResponse, error) {
+	out := new(RoomUnsubscribeResponse)
+	err := c.cc.Invoke(ctx, "/proto.Room/Unsubscribe", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RoomServer is the server API for Room service.
 // All implementations must embed UnimplementedRoomServer
 // for forward compatibility
 type RoomServer interface {
@@ -75,6 +95,8 @@ type RoomServer interface {
 	Subscribe(context.Context, *RoomSubscribeRequest) (*RoomSubscribeResponse, error)
 	GetByCriteria(context.Context, *GetRoomsByCriteriaRequest) (*GetRoomsByCriteriaResponse, error)
 	CloseRoom(context.Context, *CloseRoomRequest) (*CloseRoomResponse, error)
+	SendChatMessages(context.Context, *SendChatMessagesRequest) (*SendChatMessageResponse, error)
+	Unsubscribe(context.Context, *RoomUnsubscribeRequest) (*RoomUnsubscribeResponse, error)
 	mustEmbedUnimplementedRoomServer()
 }
 
@@ -93,6 +115,12 @@ func (UnimplementedRoomServer) GetByCriteria(context.Context, *GetRoomsByCriteri
 }
 func (UnimplementedRoomServer) CloseRoom(context.Context, *CloseRoomRequest) (*CloseRoomResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CloseRoom not implemented")
+}
+func (UnimplementedRoomServer) SendChatMessages(context.Context, *SendChatMessagesRequest) (*SendChatMessageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SendChatMessages not implemented")
+}
+func (UnimplementedRoomServer) Unsubscribe(context.Context, *RoomUnsubscribeRequest) (*RoomUnsubscribeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Unsubscribe not implemented")
 }
 func (UnimplementedRoomServer) mustEmbedUnimplementedRoomServer() {}
 
@@ -117,7 +145,7 @@ func _Room_Create_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.GetRoom/Create",
+		FullMethod: "/proto.Room/Create",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RoomServer).Create(ctx, req.(*CreateRoomRequest))
@@ -135,7 +163,7 @@ func _Room_Subscribe_Handler(srv interface{}, ctx context.Context, dec func(inte
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.GetRoom/Subscribe",
+		FullMethod: "/proto.Room/Subscribe",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RoomServer).Subscribe(ctx, req.(*RoomSubscribeRequest))
@@ -153,7 +181,7 @@ func _Room_GetByCriteria_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.GetRoom/GetByCriteria",
+		FullMethod: "/proto.Room/GetByCriteria",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RoomServer).GetByCriteria(ctx, req.(*GetRoomsByCriteriaRequest))
@@ -171,7 +199,7 @@ func _Room_CloseRoom_Handler(srv interface{}, ctx context.Context, dec func(inte
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/proto.GetRoom/CloseRoom",
+		FullMethod: "/proto.Room/CloseRoom",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RoomServer).CloseRoom(ctx, req.(*CloseRoomRequest))
@@ -179,8 +207,44 @@ func _Room_CloseRoom_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Room_SendChatMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SendChatMessagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RoomServer).SendChatMessages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.Room/SendChatMessages",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RoomServer).SendChatMessages(ctx, req.(*SendChatMessagesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Room_Unsubscribe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RoomUnsubscribeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RoomServer).Unsubscribe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.Room/Unsubscribe",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RoomServer).Unsubscribe(ctx, req.(*RoomUnsubscribeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _Room_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "proto.GetRoom",
+	ServiceName: "proto.Room",
 	HandlerType: (*RoomServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -198,6 +262,14 @@ var _Room_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CloseRoom",
 			Handler:    _Room_CloseRoom_Handler,
+		},
+		{
+			MethodName: "SendChatMessages",
+			Handler:    _Room_SendChatMessages_Handler,
+		},
+		{
+			MethodName: "Unsubscribe",
+			Handler:    _Room_Unsubscribe_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

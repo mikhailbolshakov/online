@@ -4,6 +4,7 @@ import (
 	pb "chats/proto"
 	"chats/tests/helper"
 	"testing"
+	"time"
 )
 
 func TestCreateDefault_Success(t *testing.T) {
@@ -136,91 +137,50 @@ func TestOnlineStatus_Success(t *testing.T) {
 
 }
 
-//func TestCreateEmptyType_Error(t *testing.T) {
-//
-//	sdkService, err := helper.InitSdk()
-//	if err != nil {
-//		t.Error(err.Error(), sdkService)
-//	}
-//
-//	accountId, err := helper.CreateAccountExt(sdkService, &Account{
-//		Account:    "test",
-//		Type:       "",
-//		ExternalId: "111",
-//	})
-//
-//	if accountId != uuid.Nil {
-//		t.Fatal("Test failed")
-//	}
-//
-//}
-//
-//func TestCreateAndGetByExternalId_Success(t *testing.T) {
-//
-//	sdkService, err := helper.InitSdk()
-//	if err != nil {
-//		t.Error(err.Error(), sdkService)
-//	}
-//
-//	externalId, _ := uuid.NewV4()
-//	accountId, err := helper.CreateDefaultAccount(sdkService, externalId.String())
-//
-//	if err != nil {
-//		t.Fatal(err.Error())
-//	}
-//
-//	if accountId == uuid.Nil {
-//		t.Fatal("Account creation failed. AccountId is empty")
-//	}
-//
-//	accountRs, err := helper.GetAccountByExternalId(sdkService, externalId.String())
-//	if err != nil {
-//		t.Fatal(err.Error())
-//	}
-//
-//	if accountRs.Data.Id == uuid.Nil {
-//		t.Fatal("Account not found by external Id")
-//	}
-//}
-//
-//func TestGetByEmpty_Error(t *testing.T) {
-//
-//	sdkService, err := helper.InitSdk()
-//	if err != nil {
-//		t.Error(err.Error(), sdkService)
-//	}
-//
-//	emptyAccount, err := helper.GetAccountById(sdkService, uuid.Nil)
-//	if emptyAccount.Data.Id != uuid.Nil {
-//		t.Fatal("Test failed")
-//	}
-//
-//}
-//
-//func TestOnlineStatus_Success(t *testing.T) {
-//
-//	sdkService, err := helper.InitSdk()
-//	if err != nil {
-//		t.Error(err.Error(), sdkService)
-//	}
-//
-//	accountId, err := helper.CreateDefaultAccount(sdkService, "")
-//
-//	if err != nil {
-//		t.Fatal(err.Error())
-//	}
-//
-//	if accountId == uuid.Nil {
-//		t.Fatal("Account creation failed. AccountId is empty")
-//	}
-//
-//	rs, err := helper.SetAccountOnlineStatus(sdkService, accountId, "online")
-//	if err != nil {
-//		t.Fatal(err.Error())
-//	}
-//
-//	if !rs.Result {
-//		t.Fatal(err.Error())
-//	}
-//
-//}
+func TestOnlineStatusWhenWSConnectingAndDisconnecting_Success(t *testing.T) {
+
+	conn, err := helper.GrpcConnection()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	defer conn.Close()
+
+	accountId, _, err := helper.CreateDefaultAccount(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = helper.GetAccountOnlineStatus(conn, accountId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wsFirst, _, err := helper.AccountWebSocket(accountId)
+
+	time.Sleep(time.Second)
+
+	_, err = helper.GetAccountOnlineStatus(conn, accountId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wsFirst.Close()
+
+	time.Sleep(time.Second)
+
+	_, err = helper.GetAccountOnlineStatus(conn, accountId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wsFirst, _, err = helper.AccountWebSocket(accountId)
+
+	time.Sleep(time.Second)
+
+	_, err = helper.GetAccountOnlineStatus(conn, accountId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
+

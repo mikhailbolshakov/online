@@ -44,6 +44,31 @@ func CreateDefaultAccount(conn *grpc.ClientConn) (id uuid.UUID, externalId strin
 
 }
 
+func CreateBotAccount(conn *grpc.ClientConn) (id uuid.UUID, externalId string, err error) {
+
+	accountService := pb.NewAccountClient(conn)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	accountRq := 	&pb.CreatAccountRequest{
+		Account:    "bot",
+		Type:       "bot",
+		ExternalId: system.Uuid().String(),
+	}
+
+	rs, err := accountService.Create(ctx, accountRq)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+
+	log.Printf("Bot account created. id: %s, externalId: %s \n", rs.Account.Id.Value, externalId)
+
+	return rs.Account.Id.ToUUID(), accountRq.ExternalId, nil
+
+}
+
+
 func UpdateAccount(conn *grpc.ClientConn, rq *pb.UpdateAccountRequest) error {
 
 	accountService := pb.NewAccountClient(conn)
@@ -63,7 +88,7 @@ func UpdateAccount(conn *grpc.ClientConn, rq *pb.UpdateAccountRequest) error {
 		return errors.New("errors")
 	}
 
-	log.Printf("Account updated. request: %v \n", rq)
+	log.Println("Account updated. request: % \n", rq)
 
 	return nil
 

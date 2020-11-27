@@ -145,7 +145,7 @@ func (n *Nats) Consumer(dataChan chan<- []byte) {
 	for {
 		conn := n.Connection
 		_, _ = conn.Subscribe(n.Subj, func(msg *gonats.Msg) {
-			n.Setlog("Msg NATS WS request on [%s]: %s\n", msg.Subject, msg.Data)
+			n.Setlog("Msg NATS WS request on [%s]: %s", msg.Subject, msg.Data)
 			dataChan <- msg.Data
 		})
 

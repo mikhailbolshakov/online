@@ -27,6 +27,7 @@ func (r *RoomConverter) CreateRequestFromProto(request *proto.CreateRoomRequest)
 				ExternalId: item.Account.ExternalId,
 			},
 			Role: item.Role,
+			AsSystemAccount: item.AsSystemAccount,
 		})
 	}
 
@@ -65,6 +66,7 @@ func (r *RoomConverter) SubscribeRequestFromProto(request *proto.RoomSubscribeRe
 				ExternalId: item.Account.ExternalId,
 			},
 			Role: item.Role,
+			AsSystemAccount: item.AsSystemAccount,
 		})
 	}
 
@@ -150,6 +152,64 @@ func (r *RoomConverter) CloseRoomRequestFromProto(request *proto.CloseRoomReques
 func (r *RoomConverter) CloseRoomResponseProtoFromModel(request *CloseRoomResponse) (*proto.CloseRoomResponse, *system.Error) {
 
 	result := &proto.CloseRoomResponse{
+		Errors: ProtoErrorFromErrorRs(request.Errors),
+	}
+
+	return result, nil
+
+}
+
+func (r *RoomConverter) SendChatMessageRequestFromProto(request *proto.SendChatMessagesRequest) (*SendChatMessagesRequest, *system.Error) {
+
+	result := &SendChatMessagesRequest{
+		SenderAccountId: request.SenderAccountId.ToUUID(),
+		Type:            request.Type,
+		Data:            SendChatMessagesDataRequest{
+			Messages: []SendChatMessageDataRequest{},
+		},
+	}
+
+	for _, m := range request.Data.Messages {
+		result.Data.Messages = append(result.Data.Messages, SendChatMessageDataRequest{
+			ClientMessageId:    m.ClientMessageId,
+			RoomId:             m.RoomId.ToUUID(),
+			Type:               m.Type,
+			Text:               m.Text,
+			Params:             m.Params,
+			RecipientAccountId: m.RecipientAccountId.ToUUID(),
+		})
+	}
+
+	return result, nil
+}
+
+func (r *RoomConverter) SendChatMessageResponseProtoFromModel(request *SendChatMessageResponse) (*proto.SendChatMessageResponse, *system.Error) {
+
+	result := &proto.SendChatMessageResponse{
+		Errors: ProtoErrorFromErrorRs(request.Errors),
+	}
+
+	return result, nil
+
+}
+
+func (r *RoomConverter) UnsubscribeRequestFromProto(request *proto.RoomUnsubscribeRequest) (*RoomUnsubscribeRequest, *system.Error) {
+
+	result := &RoomUnsubscribeRequest{
+		RoomId:      request.RoomId.ToUUID(),
+		ReferenceId: request.ReferenceId,
+		AccountId:   AccountIdRequest{
+			AccountId:  request.AccountId.AccountId.ToUUID(),
+			ExternalId: request.AccountId.ExternalId,
+		},
+	}
+
+	return result, nil
+}
+
+func (r *RoomConverter) UnsubscribeResponseProtoFromModel(request *RoomUnsubscribeResponse) (*proto.RoomUnsubscribeResponse, *system.Error) {
+
+	result := &proto.RoomUnsubscribeResponse{
 		Errors: ProtoErrorFromErrorRs(request.Errors),
 	}
 

@@ -32,6 +32,16 @@ func (h *ErrorHandler) SetPanic(f func()) {
 	}
 }
 
+func (h *ErrorHandler) CatchPanic(method string) {
+	if r := recover(); r != nil {
+		_, ok := r.(error)
+		if ok {
+			h.SetError(system.SysErrf(nil, system.ApplicationPanicCatched, nil, method))
+		}
+	}
+}
+
+
 func (h *ErrorHandler) Close() {
 	if h.Sentry != nil {
 		h.Sentry.Close()

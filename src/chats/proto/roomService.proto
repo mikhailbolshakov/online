@@ -9,6 +9,7 @@ import "common.proto";
 message SubscriberRequest {
   AccountIdRequest Account = 1;
   string Role = 2;
+  bool AsSystemAccount = 3;
 }
 
 message RoomResponse {
@@ -80,10 +81,45 @@ message CloseRoomResponse {
   repeated Error Errors = 1;
 }
 
+message SendChatMessageDataRequest {
+  string ClientMessageId = 1;
+  UUID RoomId = 2;
+  string Type = 3;
+  string Text = 4;
+  map<string, string> Params = 5;
+  UUID RecipientAccountId = 6;
+}
+
+message SendChatMessagesDataRequest {
+  repeated SendChatMessageDataRequest Messages = 1;
+}
+
+message SendChatMessagesRequest {
+  UUID SenderAccountId = 1;
+  string Type = 2;
+  SendChatMessagesDataRequest Data = 3;
+}
+
+message SendChatMessageResponse {
+  repeated Error Errors = 1;
+}
+
+message RoomUnsubscribeRequest {
+  UUID RoomId = 1;
+  string ReferenceId = 2;
+  AccountIdRequest AccountId = 3;
+}
+
+message RoomUnsubscribeResponse {
+  repeated Error Errors = 1;
+}
+
 service Room {
   rpc Create(CreateRoomRequest) returns (CreateRoomResponse) {}
   rpc Subscribe(RoomSubscribeRequest) returns (RoomSubscribeResponse) {}
   rpc GetByCriteria(GetRoomsByCriteriaRequest) returns (GetRoomsByCriteriaResponse) {}
   rpc CloseRoom(CloseRoomRequest) returns (CloseRoomResponse) {}
+  rpc SendChatMessages(SendChatMessagesRequest) returns (SendChatMessageResponse) {}
+  rpc Unsubscribe(RoomUnsubscribeRequest) returns (RoomUnsubscribeResponse) {}
 }
 

@@ -28,15 +28,11 @@ func (r *Router) Handle(
 }
 
 func (r *Router) Dispatch(h *Hub, c *Session, clientRequest []byte) {
+
 	request := &WSChatRequest{}
 	err := json.Unmarshal(clientRequest, &request)
 	if err != nil {
-		app.E().SetError(&system.Error{
-			Error:   err,
-			Message: system.GetError(system.UnmarshallingErrorCode),
-			Code:    system.UnmarshallingErrorCode,
-		})
-
+		app.E().SetError(system.SysErr(err, system.UnmarshallingErrorCode, nil))
 		return
 	}
 

@@ -13,32 +13,22 @@ func (r *Repository) redisGetRoom(roomId uuid.UUID) (*Room, *system.Error) {
 	key := "room:" + uid
 	val, err := r.Redis.Instance.Get(key).Bytes()
 	if err != nil {
-		if err == redis.Nil {
-			return nil, nil
-		} else {
-			return nil, &system.Error{
-				Error:   err,
-				Message: system.GetError(system.RedisSetErrorCode),
-				Code:    system.RedisSetErrorCode,
-				Data:    val,
-			}
+		if err != redis.Nil {
+			return nil, app.E().SetError(system.SysErr(err, system.RedisSetErrorCode, val))
 		}
 	}
 
 	room := &Room{}
-	err = json.Unmarshal(val, room)
-	if err != nil {
-		room.Id = uuid.Nil
-		return nil, &system.Error{
-			Error:   err,
-			Message: system.GetError(system.RedisSetErrorCode),
-			Code:    system.RedisSetErrorCode,
-			Data:    val,
+	if val != nil {
+		err = json.Unmarshal(val, room)
+		if err != nil {
+			room.Id = uuid.Nil
+			return nil, app.E().SetError(system.SysErr(err, system.UnmarshallingErrorCode, val))
 		}
+		app.L().Debugf("Room found in redis: %s", key)
 	}
 
 	return room, nil
-
 }
 
 func (r *Repository) redisSetRoom(room *Room) *system.Error {
@@ -47,18 +37,11 @@ func (r *Repository) redisSetRoom(room *Room) *system.Error {
 
 	marshal, _ := json.Marshal(room)
 
-	setErr := r.Redis.Instance.Set(key, marshal, r.Redis.Ttl).Err()
-	if setErr != nil {
-		redisError := &system.Error{
-			Error:   setErr,
-			Message: system.GetError(system.RedisSetErrorCode),
-			Code:    system.RedisSetErrorCode,
-			Data:    marshal,
-		}
-		app.E().SetError(redisError)
-
-		return redisError
+	err := r.Redis.Instance.Set(key, marshal, r.Redis.Ttl).Err()
+	if err != nil {
+		return app.E().SetError(system.SysErr(err, system.RedisSetErrorCode, marshal))
 	}
+	app.L().Debugf("Room set in redis: %s", key)
 
 	return nil
 }
@@ -69,5 +52,6 @@ func (r *Repository) redisDeleteRooms(roomIds []uuid.UUID) *system.Error {
 		keys = append(keys,  "room:" + uuid.UUID.String(r))
 	}
 	r.Redis.Instance.Del(keys...)
+	app.L().Debugf("Room delete in redis: %v", keys)
 	return nil
 }

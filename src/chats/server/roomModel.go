@@ -6,8 +6,9 @@ import (
 )
 
 type SubscriberRequest struct {
-	Account *AccountIdRequest `json:"account"`
-	Role    string            `json:"role"`
+	Account         *AccountIdRequest `json:"account"`
+	Role            string            `json:"role"`
+	AsSystemAccount bool              `json:"asSystemAccount"`
 }
 
 type RoomRequest struct {
@@ -187,8 +188,31 @@ type MessageHistoryItem struct {
 	Params          map[string]string `json:"params"`
 	// Account Id of the account who has sent this message
 	SenderAccountId uuid.UUID `json:"senderAccountId"`
-	// External Id of the account who has sent this message
-	SenderExternalId string `json:"senderExternalId"`
+	// Populated if it's a private message for the particular account subscriber
+	RecipientAccountId *uuid.UUID `json:"recipientAccountId"`
 	// Message statuses for all room's accounts map[accountId]status
 	Statuses []MessageStatus `json:"statuses"`
+}
+
+type SendChatMessagesRequest struct {
+	SenderAccountId uuid.UUID                   `json:"senderAccountId"`
+	Type            string                      `json:"type"`
+	Data            SendChatMessagesDataRequest `json:"data"`
+}
+
+type SendChatMessagesDataRequest struct {
+	Messages []SendChatMessageDataRequest `json:"messages"`
+}
+
+type SendChatMessageDataRequest struct {
+	ClientMessageId    string            `json:"clientMessageId"`
+	RoomId             uuid.UUID         `json:"roomId"`
+	Type               string            `json:"type"`
+	Text               string            `json:"text"`
+	Params             map[string]string `json:"params"`
+	RecipientAccountId uuid.UUID         `json:"recipientAccountId"`
+}
+
+type SendChatMessageResponse struct {
+	Errors []ErrorResponse `json:"errors"`
 }

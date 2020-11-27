@@ -36,6 +36,10 @@ func (s *RoomHttpService) setRouting(router *mux.Router) {
 		s.GetMessageHistory(writer, request)
 	}).Methods("GET")
 
+	router.HandleFunc("/api/v1/rooms/unsubscribe", func(writer http.ResponseWriter, request *http.Request) {
+		s.Unsubscribe(writer, request)
+	}).Methods("POST")
+
 }
 
 func (s *RoomHttpService) Create(writer http.ResponseWriter, request *http.Request) {
@@ -142,7 +146,7 @@ func (s *RoomHttpService) Close(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 
-	s.ws.httpServer.respondWithJSON(writer, http.StatusCreated, rs)
+	s.ws.httpServer.respondWithJSON(writer, http.StatusOK, rs)
 
 }
 
@@ -287,6 +291,25 @@ func (s *RoomHttpService) GetMessageHistory(writer http.ResponseWriter, request 
 	rs, err := s.ws.GetMessageHistory(rq)
 	if err != nil {
 		s.ws.httpServer.respondWithError(writer, http.StatusInternalServerError, err.Message)
+		return
+	}
+
+	s.ws.httpServer.respondWithJSON(writer, http.StatusOK, rs)
+
+}
+
+func (s *RoomHttpService) Unsubscribe(writer http.ResponseWriter, request *http.Request) {
+
+	rq := &RoomUnsubscribeRequest{}
+	decoder := json.NewDecoder(request.Body)
+	if err := decoder.Decode(rq); err != nil {
+		s.ws.httpServer.respondWithError(writer, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	rs, err := s.ws.RoomUnsubscribe(rq)
+	if err != nil {
+		s.ws.httpServer.respondWithError(writer, http.StatusBadRequest, err.Message)
 		return
 	}
 

@@ -273,7 +273,8 @@ func (db *Repository) GetAccountSubscribers(accountId uuid.UUID) map[uuid.UUID]A
 		select r.id as room_id,
 			   rs.account_id,
 			   rs.id as subscriber_id,
-			   rs.role	
+			   rs.role,
+               rs.system_account
 			from room_subscribers rs
 				join rooms r on r.id = rs.room_id
 			where rs.account_id = ?::uuid and 
@@ -335,16 +336,16 @@ func (db *Repository) GetMessageHistory(criteria *GetMessageHistoryCriteria, pag
 	*system.Error) {
 
 	type item struct {
-		Id               uuid.UUID `gorm:"column:id"`
-		ClientMessageId  string    `gorm:"column:client_message_id"`
-		ReferenceId      string    `gorm:"column:reference_id"`
-		RoomId           uuid.UUID `gorm:"column:room_id"`
-		Type             string    `gorm:"column:type"`
-		Message          string    `gorm:"column:message"`
-		FileId           string    `gorm:"column:file_id"`
-		Params           string    `gorm:"column:params"`
-		SenderAccountId  uuid.UUID `gorm:"column:account_id"`
-		SenderExternalId string    `gorm:"column:external_id"`
+		Id                 uuid.UUID  `gorm:"column:id"`
+		ClientMessageId    string     `gorm:"column:client_message_id"`
+		ReferenceId        string     `gorm:"column:reference_id"`
+		RoomId             uuid.UUID  `gorm:"column:room_id"`
+		Type               string     `gorm:"column:type"`
+		Message            string     `gorm:"column:message"`
+		FileId             string     `gorm:"column:file_id"`
+		Params             string     `gorm:"column:params"`
+		SenderAccountId    uuid.UUID  `gorm:"column:account_id"`
+		RecipientAccountId *uuid.UUID `gorm:"column:recipient_account_id"`
 	}
 
 	// here we map incoming sort fields with real fields in the query
@@ -364,14 +365,13 @@ func (db *Repository) GetMessageHistory(criteria *GetMessageHistoryCriteria, pag
 		  	cm.account_id,
 			cm.file_id,
 			cm.params,
-		  	sender_acc.external_id
+			cm.recipient_account_id
 			`
 
 	query := db.Storage.Instance.
 		Table(`
 			chat_messages cm 
-	  			inner join rooms r on cm.room_id = r.id
-	  			inner join accounts sender_acc on cm.account_id = sender_acc.id`).
+	  			inner join rooms r on cm.room_id = r.id`).
 		Where(`
 			r.chat = 1  and
 		  	r.deleted_at is null and
@@ -386,6 +386,9 @@ func (db *Repository) GetMessageHistory(criteria *GetMessageHistoryCriteria, pag
 	}
 
 	if criteria.AccountId != uuid.Nil {
+		// retrieve private messages for the requested account only
+		query = query.Where(`(cm.recipient_account_id = ?::uuid or cm.recipient_account_id is null)`, criteria.AccountId)
+		// all messages where given account is among subscribers (event though unsubscribed)
 		query = query.Where(`exists(select 1 
 											from room_subscribers rs
 											where rs.room_id = r.id and
@@ -397,7 +400,8 @@ func (db *Repository) GetMessageHistory(criteria *GetMessageHistoryCriteria, pag
 												from room_subscribers rs
 													inner join accounts acc_s on rs.account_id = acc_s.id 
 												where rs.room_id = r.id and
-												acc_s.external_id = ?)`, criteria.AccountExternalId)
+												acc_s.external_id = ? and
+												(acc_s.id = cm.recipient_account_id or cm.recipient_account_id is null))`, criteria.AccountExternalId)
 	}
 
 	if criteria.CreatedAfter != nil {
@@ -443,6 +447,7 @@ func (db *Repository) GetMessageHistory(criteria *GetMessageHistoryCriteria, pag
 	}
 	defer rows.Close()
 
+	var roomMap = make(map[uuid.UUID]bool)
 	var roomIds []uuid.UUID
 	for rows.Next() {
 		item := &item{}
@@ -457,19 +462,23 @@ func (db *Repository) GetMessageHistory(criteria *GetMessageHistoryCriteria, pag
 		}
 
 		result = append(result, MessageHistoryItem{
-			Id:               item.Id,
-			ClientMessageId:  item.ClientMessageId,
-			ReferenceId:      item.ReferenceId,
-			RoomId:           item.RoomId,
-			Type:             item.Type,
-			Message:          item.Message,
-			FileId:           item.FileId,
-			Params:           jsonParams,
-			SenderAccountId:  item.SenderAccountId,
-			SenderExternalId: item.SenderExternalId,
-			Statuses:         []MessageStatus{},
+			Id:                 item.Id,
+			ClientMessageId:    item.ClientMessageId,
+			ReferenceId:        item.ReferenceId,
+			RoomId:             item.RoomId,
+			Type:               item.Type,
+			Message:            item.Message,
+			FileId:             item.FileId,
+			Params:             jsonParams,
+			SenderAccountId:    item.SenderAccountId,
+			RecipientAccountId: item.RecipientAccountId,
+			Statuses:           []MessageStatus{},
 		})
-		roomIds = append(roomIds, item.RoomId)
+		roomMap[item.RoomId] = true
+	}
+
+	for id, _ := range roomMap{
+		roomIds = append(roomIds, id)
 	}
 
 	// populate statuses
@@ -534,8 +543,7 @@ func (db *Repository) getMessageAccounts(roomIds []uuid.UUID) ([]MessageAccount,
 			 select a.* 
 			   from room_subscribers rs 
 			   inner join accounts a on rs.account_id = a.id 
-			 where rs.system_account <> 1 and 
-				   rs.deleted_at is null and
+			 where rs.deleted_at is null and
 					rs.room_id in (?)
 		`, roomIds).Scan(&result).Error
 	if err != nil {
@@ -588,18 +596,24 @@ func (db *Repository) CreateMessage(messageModel *ChatMessage, opponents []ChatO
 
 	for _, o := range opponents {
 
-		status := &ChatMessageStatus{
-			Id:          system.Uuid(),
-			AccountId:   o.AccountId,
-			MessageId:   messageModel.Id,
-			SubscribeId: o.SubscriberId,
-			Status:      MessageStatusRecd,
-		}
+		// we avoid setting status for system account because they aren't expected to read messages
+		if !o.SystemAccount &&
+		// we don't set status for other opponents if it's a private message
+			(messageModel.RecipientAccountId == nil || uuid.Equal(*messageModel.RecipientAccountId, o.AccountId)) {
 
-		err := tx.Create(status).Error
-		if err != nil {
-			tx.Rollback()
-			return system.E(err)
+			status := &ChatMessageStatus{
+				Id:          system.Uuid(),
+				AccountId:   o.AccountId,
+				MessageId:   messageModel.Id,
+				SubscribeId: o.SubscriberId,
+				Status:      MessageStatusRecd,
+			}
+
+			err := tx.Create(status).Error
+			if err != nil {
+				tx.Rollback()
+				return system.E(err)
+			}
 		}
 	}
 
@@ -609,6 +623,30 @@ func (db *Repository) CreateMessage(messageModel *ChatMessage, opponents []ChatO
 	}
 
 	return nil
+}
+
+func (db *Repository) GetAccountRecdMessages(accountId uuid.UUID, roomId uuid.UUID) ([]ChatMessage, *system.Error) {
+
+	var result []ChatMessage
+
+	err := db.Storage.Instance.Raw(`
+			select * 
+				from chat_messages cm
+				where room_id = ?::uuid and
+					cm.deleted_at is null and
+					exists(select 1 
+							  from chat_message_statuses cms 
+							  where cm.id = cms.message_id and
+		          					cms.account_id = ?::uuid and
+									cms.status = 'recd' and
+									cms.deleted_at is null) 
+			order by cm.created_at
+		`, roomId, accountId).Scan(&result).Error
+	if err != nil {
+		return nil, system.E(err)
+	}
+
+	return result, nil
 }
 
 func (db *Repository) RecdUsers(createdAt time.Time) []RoomSubscriber {

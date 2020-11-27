@@ -42,23 +42,26 @@ type AccountSubscriber struct {
 	AccountId    uuid.UUID
 	SubscriberId uuid.UUID
 	Role         string
+	SystemAccount uint8
 }
 
 type ChatOpponent struct {
-	SubscriberId uuid.UUID
-	AccountId    uuid.UUID
+	SubscriberId  uuid.UUID
+	AccountId     uuid.UUID
+	SystemAccount bool
 }
 
 type ChatMessage struct {
-	Id              uuid.UUID
-	ClientMessageId string    `gorm:"column:client_message_id"`
-	RoomId          uuid.UUID `gorm:"column:room_id"`
-	SubscribeId     uuid.UUID `gorm:"column:subscribe_id"`
-	AccountId       uuid.UUID `gorm:"column:account_id"`
-	Type            string    `gorm:"column:type"`
-	Message         string    `gorm:"column:message"`
-	FileId          string    `gorm:"column:file_id"`
-	Params          string    `gorm:"column:params"`
+	Id                 uuid.UUID
+	ClientMessageId    string     `gorm:"column:client_message_id"`
+	RoomId             uuid.UUID  `gorm:"column:room_id"`
+	SubscribeId        uuid.UUID  `gorm:"column:subscribe_id"`
+	AccountId          uuid.UUID  `gorm:"column:account_id"`
+	Type               string     `gorm:"column:type"`
+	Message            string     `gorm:"column:message"`
+	FileId             string     `gorm:"column:file_id"`
+	Params             string     `gorm:"column:params"`
+	RecipientAccountId *uuid.UUID `gorm:"column:recipient_account_id"`
 	rep.BaseModel
 }
 
@@ -70,25 +73,6 @@ type ChatMessageStatus struct {
 	Status      string    `gorm:"column:status" sql:"not null;type:ENUM('recd', 'read');default:'recd';"`
 	rep.BaseModel
 }
-
-type ChatMessageHistory struct {
-	AccountId   uuid.UUID `json:"account_id"`
-	RoomId      uuid.UUID `json:"room_id"`
-	MessageId   uuid.UUID `json:"message_id"`
-	NewMessages bool      `json:"new_messages"`
-	Role        string    `json:"role"`
-	Count       int64     `json:"count"`
-	Admin       bool      `json:"admin"`
-	Search      string    `json:"search"`
-	Date        string    `json:"date"`
-	OnlyOneChat bool      `json:"only_one_chat"`
-}
-
-type FirstMessage struct {
-	Id uuid.UUID `json:"id"`
-}
-
-
 
 type GetMessageHistoryCriteria struct {
 	AccountId         uuid.UUID
@@ -125,15 +109,15 @@ type MessageAccount struct {
 }
 
 type MessageHistoryItem struct {
-	Id               uuid.UUID
-	ClientMessageId  string
-	ReferenceId      string
-	RoomId           uuid.UUID
-	Type             string
-	Message          string
-	FileId           string
-	Params           map[string]string
-	SenderAccountId  uuid.UUID
-	SenderExternalId string
-	Statuses         []MessageStatus
+	Id                 uuid.UUID
+	ClientMessageId    string
+	ReferenceId        string
+	RoomId             uuid.UUID
+	Type               string
+	Message            string
+	FileId             string
+	Params             map[string]string
+	SenderAccountId    uuid.UUID
+	RecipientAccountId *uuid.UUID
+	Statuses           []MessageStatus
 }

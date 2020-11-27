@@ -51,7 +51,7 @@ func (h *Hub) Run() {
 			app.L().Debug(">>> session unregister:", session.account.Id) //	TODO
 			h.checkConnectionStatus(session.account.Id, false)
 		case message := <-h.messageChan:
-			app.L().Debugf("Sending message to internal topic: %v \n", message.Message)
+			app.L().Debugf("Sending message to internal topic. roomId: %s, accountId: %s", message.RoomId, message.AccountId)
 
 			{ //	Scaling
 				answer, err := json.Marshal(message)
@@ -67,7 +67,17 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) onSessionDisconnect(session *Session) {
+
 	if _, ok := h.sessions[session.sessionId]; ok {
+
+		app.L().Debugf("Session cleanup %s", session.sessionId)
+
+		// set account status offline
+		err := wsServer.setAccountOffline(session.account.Id)
+		if err != nil {
+			app.E().SetError(err)
+		}
+
 		delete(h.sessions, session.sessionId)
 		h.removeSessionFromRooms(session)
 		close(session.sendChan)
@@ -76,6 +86,7 @@ func (h *Hub) onSessionDisconnect(session *Session) {
 			delete(h.accounts, session.account.Id)
 			delete(h.accountSessions, session.account.Id)
 		}
+
 	}
 }
 

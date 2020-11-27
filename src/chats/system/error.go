@@ -2,6 +2,8 @@ package system
 
 const (
 
+	ApplicationPanicCatched    = 100
+
 	ApplicationErrorCode    = 200
 	UnmarshallingErrorCode  = 201
 	ParseErrorCode          = 205
@@ -10,9 +12,24 @@ const (
 	SdkConnectionErrorCode  = 230
 	CronResponseErrorCode   = 301
 
+	WsCreateAccountInvalidTypeErrorCode = 2001
+	WsCreateAccountEmptyAccountErrorCode = 2002
+	WsConnectAccountSystemCode = 2003
+	AccountIncorrectOnlineStatus = 2004
+	AccountNotFoundById = 2005
+	AccountOnlineStatusWithoutLiveConnection = 2006
+
+	NoRoomFoundByIdCode = 3001
+	NoRoomFoundByReferenceCode = 3002
+	RoomAlreadyClosedCode = 3003
+	NotSubscribedAccountCode = 3004
+
+	IncorrectRequestCode = 4000
+
 )
 
 var errList = Errors {
+	ApplicationPanicCatched: "Перехвачена паника в методе %s",
 
 	200: "Общая ошибка приложения",
 	201: "Ошибка при анмаршаллинге",
@@ -43,6 +60,21 @@ var errList = Errors {
 	1403: "Передан некорректный параметр userId",
 	1404: "Передан некорректный параметр type",
 	1405: "Передан некорректный параметр orderId",
+
+	WsCreateAccountInvalidTypeErrorCode: "Неверный тип аккаунта",
+	WsCreateAccountEmptyAccountErrorCode: "Пустое значение наименование аккаунта",
+	WsConnectAccountSystemCode: "Невозможно создать соединение для системного аккаунта",
+	AccountIncorrectOnlineStatus: "Некорректный онлайн статус",
+	AccountNotFoundById: "Аккаунт не найден по ИД %s",
+	AccountOnlineStatusWithoutLiveConnection: "невозможно установить статус %s при отсутствие открытого соединения",
+
+	NoRoomFoundByIdCode: "Комната не найдена по ИД %s",
+	NoRoomFoundByReferenceCode: "Комната не найдена по referenceId %s",
+	RoomAlreadyClosedCode: "Комната уже закрыта",
+	NotSubscribedAccountCode: "Аккаунт %s не подписан на комнату %s",
+
+	IncorrectRequestCode: "Некорректный запрос",
+
 }
 
 
@@ -77,6 +109,8 @@ const (
 	MysqlChatMessageTypeIncorrect     = "Передан некорректный параметр type"
 	MysqlChatMessageTypeIncorrectCode = 351
 	MysqlChatAccessDenied             = "Пользователь не подписан на чат"
+	PrivateChatRecipientNotFoundAmongSubscribersCode = 352
+
 	MysqlChatAccessDeniedCode         = 501
 
 	DbAccountOnlineStatusUpdateError = "Ошибка при обновлении online статуса"
@@ -119,11 +153,5 @@ const (
 	WsSendMessageErrorCode         = 108
 	WsConnReadMessageError         = ">>> FATAL: Ошибка чтения сообщения"
 	WsConnReadMessageErrorCode     = 109
-
-	WsCreateAccountInvalidTypeErrorMessage = "Неверный тип аккаунта"
-	WsCreateAccountInvalidTypeErrorCode = 201
-	WsCreateAccountEmptyAccountErrorMessage = "Пустое значение наименование аккаунта"
-	WsCreateAccountEmptyAccountErrorCode = 202
-
 
 )

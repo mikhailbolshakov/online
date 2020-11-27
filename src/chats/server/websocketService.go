@@ -19,7 +19,7 @@ func (s *WebSocketService) setRouting(router *mux.Router) {
 
 	router.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
 		app.L().Debug("request:" + r.Host + r.URL.EscapedPath())
-		s.AccountConnect(w, r)
+		s.accountConnect(w, r)
 	})
 
 }
@@ -34,7 +34,9 @@ func createResponse(response *WSChatErrorResponse) []byte {
 	return result
 }
 
-func (s *WebSocketService) AccountConnect(w http.ResponseWriter, r *http.Request) {
+func (s *WebSocketService) accountConnect(w http.ResponseWriter, r *http.Request) {
+
+	defer app.E().CatchPanic("accountConnect")
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -45,9 +47,9 @@ func (s *WebSocketService) AccountConnect(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	//	userToken
+	//	take user token from url
 	token := r.URL.Query().Get("token")
-	app.L().Debugf("Session with token %s is connecting \n", token)
+	app.L().Debugf("Session with token %s is connecting", token)
 	if token == "" {
 		response := &WSChatErrorResponse{
 			Error: WSChatErrorErrorResponse{
@@ -65,7 +67,7 @@ func (s *WebSocketService) AccountConnect(w http.ResponseWriter, r *http.Request
 	// if token comes we need to verify it with the external system
 	accRep := a.CreateRepository(app.GetDB())
 	account, sysErr := accRep.GetAccount(uuid.FromStringOrNil(token), "")
-	app.L().Debugf("Account found by token: %v \n", account)
+	app.L().Debugf("Account found by token: %s", *account)
 	if sysErr != nil || account.Id == uuid.Nil {
 		response := &WSChatErrorResponse{
 			Error: WSChatErrorErrorResponse{
@@ -86,10 +88,16 @@ func (s *WebSocketService) AccountConnect(w http.ResponseWriter, r *http.Request
 	rooms := make(map[uuid.UUID]*Room)
 	roomRep := rr.CreateRepository(app.GetDB())
 	subscribers := roomRep.GetAccountSubscribers(account.Id)
-	app.L().Debugf("Subscribers found: %v \n", subscribers)
-	for roomId, _ := range subscribers {
+	app.L().Debugf("Subscribers found: %s", subscribers)
+
+	for roomId, sb := range subscribers {
+		// check if it's not a system account connecting
+		if system.Uint8ToBool(sb.SystemAccount) {
+			app.E().SetError(system.SysErr(nil, system.WsConnectAccountSystemCode, []byte("token: " + token)))
+			return
+		}
 		room := s.ws.hub.LoadRoomIfNotExists(roomId)
-		app.L().Debugf("Room loaded and added to session: %v \n", room)
+		app.L().Debugf("Room loaded and added to session: %s", room)
 		room.AddSession(session.sessionId)
 		rooms[roomId] = room
 	}
@@ -100,5 +108,18 @@ func (s *WebSocketService) AccountConnect(w http.ResponseWriter, r *http.Request
 	s.ws.hub.registerChan <- session
 	go session.Write()
 	go session.Read()
+
+	// resend recd messages to session socket
+	go func() {
+		for _, r := range rooms {
+			s.ws.resendRecdMessagesToSession(session, r.roomId)
+		}
+	}()
+
+	// setup account status = ONLINE
+	sysErr = s.ws.setAccountOnline(account.Id)
+	if sysErr != nil {
+		app.E().SetError(sysErr)
+	}
 
 }

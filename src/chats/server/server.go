@@ -22,14 +22,17 @@ type WsServer struct {
 	actualAccountsMutex sync.Mutex
 }
 
+var wsServer = &WsServer{}
+
 func NewServer(app *app.Application) *WsServer {
-	return &WsServer{
+	wsServer = &WsServer{
 		apiTopic:       app.Inf.Nats.BusTopic(),
 		port:           os.Getenv("WEBSOCKET_PORT"),
 		hub:            NewHub(),
 		shutdownSleep:  getShutdownSleep(),
 		actualAccounts: make(map[uuid.UUID]time.Time),
 	}
+	return wsServer
 }
 
 func getShutdownSleep() time.Duration {

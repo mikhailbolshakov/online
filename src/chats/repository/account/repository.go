@@ -86,7 +86,9 @@ func (s *Repository) UpdateOnlineStatus(accountId uuid.UUID, status string) *sys
 					UpdatedAt: time.Now(),
 				},
 			}).Error
-		app.E().SetError(system.E(err))
+		if err != nil {
+			app.E().SetError(system.E(err))
+		}
 	}()
 
 	return nil

@@ -5,6 +5,7 @@ import (
 	a "chats/repository/account"
 	"chats/system"
 	"fmt"
+	uuid "github.com/satori/go.uuid"
 )
 
 const (
@@ -27,7 +28,13 @@ const (
 
 func validateCreateAccount(account *CreateAccountRequest) (bool, *system.Error) {
 
-	if account.Type == "" || (account.Type != AccountTypeAnonymousUser && account.Type != AccountTypeUser) {
+	typesMap := map[string]bool {
+		AccountTypeBot: true,
+		AccountTypeAnonymousUser: true,
+		AccountTypeUser: true,
+	}
+
+	if _, ok := typesMap[account.Type]; !ok {
 		return false, system.SysErr(nil, system.WsCreateAccountInvalidTypeErrorCode, nil)
 	}
 
@@ -39,6 +46,8 @@ func validateCreateAccount(account *CreateAccountRequest) (bool, *system.Error) 
 }
 
 func (ws *WsServer) createAccount(request *CreateAccountRequest) (*CreateAccountResponse, *system.Error) {
+
+	defer app.E().CatchPanic("createAccount")
 
 	response := &CreateAccountResponse{
 		Errors: []ErrorResponse{},
@@ -91,20 +100,32 @@ func (ws *WsServer) createAccount(request *CreateAccountRequest) (*CreateAccount
 	return response, nil
 }
 
+func (ws *WsServer) setAccountOnline(id uuid.UUID) *system.Error{
+	_, err := wsServer.setOnlineStatus(&SetAccountOnlineStatusRequest{
+		Account: &AccountIdRequest{AccountId: id},
+		Status:  OnlineStatusOffline,
+	})
+	return err
+}
+
+func (ws *WsServer) setAccountOffline(id uuid.UUID) *system.Error{
+	_, err := wsServer.setOnlineStatus(&SetAccountOnlineStatusRequest{
+		Account: &AccountIdRequest{AccountId: id},
+		Status:  OnlineStatusOffline,
+	})
+	return err
+}
+
 func (ws *WsServer) setOnlineStatus(request *SetAccountOnlineStatusRequest) (*SetAccountOnlineStatusResponse, *system.Error) {
 
-	ok := false
-	for _, s := range []string{OnlineStatusOffline, OnlineStatusAway, OnlineStatusBusy, OnlineStatusOnline} {
-		if request.Status == s {
-			ok = true
-			break
-		}
+	defer app.E().CatchPanic("setOnlineStatus")
+
+	stMap := map[string]bool{
+		OnlineStatusOffline:true, OnlineStatusAway:true, OnlineStatusBusy:true, OnlineStatusOnline:true,
 	}
-	if !ok {
-		return nil, &system.Error{
-			Message: fmt.Sprintf("Status %s is invalid", request.Status),
-			Code:    0,
-		}
+
+	if _, ok := stMap[request.Status]; !ok {
+		return nil, system.SysErr(nil, system.AccountIncorrectOnlineStatus, []byte(request.Status))
 	}
 
 	rep := a.CreateRepository(app.GetDB())
@@ -114,11 +135,14 @@ func (ws *WsServer) setOnlineStatus(request *SetAccountOnlineStatusRequest) (*Se
 	if err != nil {
 		return nil, err
 	}
-
 	if account == nil {
-		return nil, &system.Error{
-			Message: fmt.Sprintf("Account not found (id: %s, extId: %s)", request.Account.AccountId.String(), request.Account.ExternalId),
-			Code:    0,
+		return nil, system.SysErrf(nil, system.AccountNotFoundById, nil, request.Account.AccountId)
+	}
+
+	// all these statuses suppose the user has live connection
+	if request.Status != OnlineStatusOffline {
+		if _, ok := ws.hub.accountSessions[account.Id]; !ok {
+			return nil, system.SysErrf(nil, system.AccountOnlineStatusWithoutLiveConnection, nil, request.Status)
 		}
 	}
 
@@ -135,6 +159,8 @@ func (ws *WsServer) setOnlineStatus(request *SetAccountOnlineStatusRequest) (*Se
 }
 
 func (ws *WsServer) getOnlineStatus(request *GetAccountOnlineStatusRequest) (*GetAccountOnlineStatusResponse, *system.Error) {
+
+	defer app.E().CatchPanic("getOnlineStatus")
 
 	rep := a.CreateRepository(app.GetDB())
 
@@ -167,6 +193,8 @@ func (ws *WsServer) getOnlineStatus(request *GetAccountOnlineStatusRequest) (*Ge
 
 func (ws *WsServer) updateAccount(request *UpdateAccountRequest) (*UpdateAccountResponse, *system.Error) {
 
+	defer app.E().CatchPanic("updateAccount")
+
 	rep := a.CreateRepository(app.GetDB())
 
 	account, err := rep.GetAccount(request.AccountId.AccountId, request.AccountId.ExternalId)
@@ -198,6 +226,8 @@ func (ws *WsServer) updateAccount(request *UpdateAccountRequest) (*UpdateAccount
 }
 
 func (ws *WsServer) getAccountsByCriteria(criteria *GetAccountsByCriteriaRequest) (*GetAccountsByCriteriaResponse, *system.Error) {
+
+	defer app.E().CatchPanic("getAccountsByCriteria")
 
 	rep := a.CreateRepository(app.GetDB())
 
@@ -232,6 +262,8 @@ func (ws *WsServer) getAccountsByCriteria(criteria *GetAccountsByCriteriaRequest
 }
 
 func (ws *WsServer) getAccountById(request *AccountIdRequest) (*Account, *system.Error) {
+
+	defer app.E().CatchPanic("getAccountById")
 
 	rep := a.CreateRepository(app.GetDB())
 

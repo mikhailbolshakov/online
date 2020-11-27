@@ -27,8 +27,8 @@ func SendMessage(socket *websocket.Conn, accountId uuid.UUID, messageType string
 	}
 
 	msgRq := &server.WSChatMessagesRequest{
-		AccountId: accountId,
-		Type:      messageType,
+		SenderAccountId: accountId,
+		Type:            messageType,
 		Data: server.WSChatMessagesDataRequest{
 			Messages: []server.WSChatMessageDataRequest{*message},
 		},
